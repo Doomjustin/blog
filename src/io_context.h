@@ -1,3 +1,6 @@
+#ifndef BLOG_IO_CONTEXT_H
+#define BLOG_IO_CONTEXT_H
+
 #include <cassert>
 #include <cstdlib>
 
@@ -7,11 +10,8 @@
 #include <liburing.h>
 #include <spdlog/spdlog.h>
 
-#include "co_spawn.h"
+#include "exceptions.h"
 #include "operation.h"
-#include "signals.h"
-#include "sleep_for.h"
-#include "task.h"
 
 // 只支持 core per thread 模型，所以io_context本身不需要考虑线程安全问题
 class IOContext {
@@ -156,40 +156,4 @@ private:
     }
 };
 
-auto shutdown_monitor(IOContext& context) -> Task<void>
-{
-    using namespace std::chrono_literals;
-
-    SignalSet sets{ context, signals::interrupt, signals::terminate };
-
-    co_await sets.async_wait();
-
-    spdlog::info("Received shutdown signal, stopping IOContext...");
-    context.stop();
-}
-
-auto demo(IOContext& context) -> Task<void>
-{
-    using namespace std::chrono_literals;
-    spdlog::info("demo started");    
-
-    // 模拟一些持续的异步工作，直到接收到退出信号
-    while (true) 
-        co_await sleep_for(context, 1s);
-
-    spdlog::info("demo completed");
-}
-
-int main(int argc, char* argv[])
-{
-    IOContext context{};
-
-    co_spawn(context, demo(context));
-    co_spawn(context, shutdown_monitor(context));
-
-    context.run();
-
-    spdlog::info("IOContext stopped, exiting...");
-
-    return EXIT_SUCCESS;
-}
+#endif // BLOG_IO_CONTEXT_H

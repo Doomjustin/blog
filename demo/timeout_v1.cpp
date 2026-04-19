@@ -12,6 +12,7 @@
 #include "signals.h"
 #include "sleep_for.h"
 #include "task.h"
+#include "timeout.h"
 
 // 只支持 core per thread 模型，所以io_context本身不需要考虑线程安全问题
 class IOContext {
@@ -162,7 +163,8 @@ auto shutdown_monitor(IOContext& context) -> Task<void>
 
     SignalSet sets{ context, signals::interrupt, signals::terminate };
 
-    co_await sets.async_wait();
+    // 唯一改动点，测试一下timeout的行为是否正确
+    co_await timeout(sets.async_wait(), 5s);
 
     spdlog::info("Received shutdown signal, stopping IOContext...");
     context.stop();

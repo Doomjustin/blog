@@ -46,7 +46,7 @@ public:
         ::io_uring_prep_poll_add(sqe, fd_, events_);
     }
 
-    void set_result(int result, std::uint32_t) noexcept
+    void set_result(int result, [[maybe_unused]] std::uint32_t flags) noexcept
     {
         error_code_ = result < 0 ? -result : 0;
     }
