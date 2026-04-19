@@ -1,12 +1,15 @@
 #include <cassert>
 #include <cstdlib>
 
+#include <sys/eventfd.h>
+#include <sys/poll.h>
+
 #include <liburing.h>
 #include <spdlog/spdlog.h>
 
 #include "co_spawn.h"
-#include "exceptions.h"
 #include "operation.h"
+#include "signals.h"
 #include "sleep_for.h"
 #include "task.h"
 
@@ -17,6 +20,12 @@ public:
     {
         if (auto res = ::io_uring_queue_init(entries, &ring_, 0); res < 0)
             throw_system_error(-res, "io_uring_queue_init");            
+
+        wakeup_fd_ = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+        if (wakeup_fd_ == -1)
+            throw_system_error("Failed to create eventfd for stopping IOContext");
+
+        arm_wakeup();
     }
 
     IOContext(const IOContext&) = delete;
@@ -29,6 +38,7 @@ public:
     ~IOContext()
     {
         ::io_uring_queue_exit(&ring_);
+        ::close(wakeup_fd_);
     }
 
     void run()
@@ -37,31 +47,43 @@ public:
 
         while (!should_stop_.load(std::memory_order_relaxed) && outstanding_works_ > 0)
         {
-            if (::io_uring_submit_and_wait(&ring_, 1) < 0)
-                throw_system_error("io_uring_submit_and_wait");
+            auto res = ::io_uring_submit_and_wait(&ring_, 1);
+            if (res < 0) {
+                if (res == -EINTR)
+                    continue;
 
+                throw_system_error("io_uring_submit_and_wait");
+            }
+                
             unsigned head;
             unsigned count{ 0 };
+            unsigned workdone{ 0 };
 
             io_uring_for_each_cqe(&ring_, head, cqe) {
                 ++count;
 
-                if (cqe->user_data != 0) {
-                    auto* op = reinterpret_cast<Operation*>(cqe->user_data);
+                if (io_uring_cqe_get_data64(cqe) == WAKEUP_MARKER) {
+                    resume_wakeup();
+                    arm_wakeup();
+                    continue;
+                }
+
+                if (io_uring_cqe_get_data64(cqe) != 0) {
+                    auto* op = static_cast<Operation*>(io_uring_cqe_get_data(cqe));
                     op->complete(cqe->res, cqe->flags);
+
+                    ++workdone;
                 }
             }
 
-            if (count > 0) {
-                outstanding_works_ -= count;
+            if (count > 0)
                 ::io_uring_cq_advance(&ring_, count);
-            }
+
+            if (workdone > 0)
+                outstanding_works_ -= workdone;
         }
     }
 
-    // 给外部组件提供便捷的接口来获取 SQE，以便提交 I/O 请求
-    // 这个接口会自动增加 outstanding_operations_ 的计数，
-    // 以便在 run() 方法中能够正确地判断是否还有未完成的工作。
     [[nodiscard]]
     auto sqe() -> ::io_uring_sqe*
     {
@@ -75,10 +97,8 @@ public:
 
     void stop()
     {
-        // TODO: 显然，只有这个变量是不足以完整实现 stop 功能的
-        // 还需要考虑如何取消已经提交但尚未完成的 I/O 请求，以及如何通知正在等待的 run() 方法尽快返回。
-        // 我们将在未来的版本中逐步完善这个功能。
         should_stop_.store(true, std::memory_order_relaxed);
+        wakeup();
     }
 
     auto ring() noexcept -> ::io_uring*
@@ -86,7 +106,6 @@ public:
         return &ring_;
     }
 
-    [[nodiscard]] 
     auto ring() const noexcept -> const ::io_uring*
     {
         return &ring_;
@@ -104,30 +123,70 @@ public:
     }
     
 private:
+    static constexpr auto WAKEUP_MARKER = std::numeric_limits<std::uintptr_t>::max();
+
     ::io_uring ring_{};
+    int wakeup_fd_{ -1 };
 
     // 只用来追踪io_context之外的操作，并不需要用户主动来使用相关的接口
     std::size_t outstanding_works_{ 0 };
     // stop会被跨线程调用，所以需要使用原子变量来保证线程安全
     std::atomic<bool> should_stop_{ false };
+
+    void arm_wakeup() noexcept
+    {
+        auto* sqe = ::io_uring_get_sqe(&ring_);
+        if (!sqe) return;
+
+        ::io_uring_prep_poll_add(sqe, wakeup_fd_, POLLIN);
+        ::io_uring_sqe_set_data64(sqe, WAKEUP_MARKER);
+    }   
+    
+    void wakeup()
+    {
+        std::uint64_t val = 1;
+        ::write(wakeup_fd_, &val, sizeof(val));
+    }
+
+    void resume_wakeup()
+    {
+        uint64_t val;
+        ::read(wakeup_fd_, &val, sizeof(val));
+    }
 };
+
+auto shutdown_monitor(IOContext& context) -> Task<void>
+{
+    using namespace std::chrono_literals;
+
+    SignalSet sets{ context, signals::interrupt, signals::terminate };
+
+    co_await sets.async_wait();
+
+    spdlog::info("Received shutdown signal, stopping IOContext...");
+    context.stop();
+}
 
 auto demo(IOContext& context) -> Task<void>
 {
     using namespace std::chrono_literals;
+    spdlog::info("before sleep...");    
     
-    spdlog::info("before sleep");
+    co_await sleep_for(context, 10min);
 
-    co_await sleep_for(context, 5s);
-
-    spdlog::info("after sleep");
+    spdlog::info("after sleep...");
 }
 
 int main(int argc, char* argv[])
 {
     IOContext context{};
+
     co_spawn(context, demo(context));
+    co_spawn(context, shutdown_monitor(context));
 
     context.run();
+
+    spdlog::info("IOContext stopped, exiting...");
+
     return EXIT_SUCCESS;
 }

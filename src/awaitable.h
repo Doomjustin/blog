@@ -1,10 +1,9 @@
 #ifndef BLOG_AWAITABLE_H
 #define BLOG_AWAITABLE_H
 
-#include <coroutine>
 #include <concepts>
+#include <coroutine>
 #include <utility>
-
 
 template<typename T>
 concept awaiter = requires(T& t, std::coroutine_handle<> handle)

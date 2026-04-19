@@ -1,5 +1,7 @@
 {
   "cmake.outputLogEncoding": "utf-8",
+  "cmake.modifyLists.addNewSourceFiles": "no",
+  "cmake.modifyLists.removeDeletedSourceFiles": "no",
   "editor.formatOnSave": false,
   "clangd.path": "clangd",
   "cmake.configureSettings": {

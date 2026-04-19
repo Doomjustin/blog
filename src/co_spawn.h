@@ -5,7 +5,6 @@
 #include "detached_task.h"
 #include "tracking_context.h"
 
-
 template<tracking_context Context, awaitable Awaitable>
     requires std::movable<std::remove_cvref_t<Awaitable>>
 auto co_spawn(Context& ctx, Awaitable awaitable) -> DetachedTask<Context>

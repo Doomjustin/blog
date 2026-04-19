@@ -8,3 +8,4 @@ endfunction()
 
 
 add_blog_executable(io_context_v1)
+add_blog_executable(io_context_v2)

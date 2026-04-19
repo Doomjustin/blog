@@ -9,7 +9,6 @@
 
 #include "final_awaiter.h"
 
-
 template<typename T = void>
 class Task;
 

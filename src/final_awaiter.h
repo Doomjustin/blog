@@ -3,7 +3,6 @@
 
 #include <coroutine>
 
-
 class FinalAwaiter {
 public:
     [[nodiscard]]

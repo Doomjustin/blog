@@ -1,10 +1,6 @@
 #ifndef XIN_BLOG_SLEEP_FOR_H
 #define XIN_BLOG_SLEEP_FOR_H
 
-#include "operation.h"
-#include "exceptions.h"
-#include "chrono_duration.h"
-
 #include <chrono>
 #include <coroutine>
 #include <expected>
@@ -13,15 +9,18 @@
 
 #include <liburing.h>
 
+#include "chrono_duration.h"
+#include "exceptions.h"
+#include "operation.h"
 
 // 为了搭配不同版本的IOContext，我们将 sleep_for 的实现放在了单独的头文件中，以便在不同版本的 IOContext 中进行适当的调整。
 // 但是这样一来，我们无法在头文件中拿到IOContext的定义，因此我们需要将IOContext作为模板参数传入，以便在实现中能够正确地调用相关接口。
 // 这里基于这样一个前提，调用点应该能够正确地推导出IOContext的类型，从而能够正确地实例化 SleepAwaiter 类。
-template<typename IOContext>
+template<typename Context>
 class SleepAwaiter: public Operation {
 public:
     template<chrono_duration Duration>
-    SleepAwaiter(IOContext& context, Duration d)
+    SleepAwaiter(Context& context, Duration d)
       : context_{ context }
     {
         using namespace std::chrono;
@@ -67,17 +66,17 @@ public:
     }
 
 private:
-    IOContext& context_;
+    Context& context_;
     struct __kernel_timespec timeout_{};
     std::coroutine_handle<> handle_{ nullptr };
     int error_code_{ 0 };
 };
 
 
-template<typename IOContext, chrono_duration Duration>
-auto sleep_for(IOContext& context, Duration duration) -> SleepAwaiter<IOContext>
+template<typename Context, chrono_duration Duration>
+auto sleep_for(Context& context, Duration duration) -> SleepAwaiter<Context>
 {
-    return SleepAwaiter<IOContext>{ context, duration };
+    return SleepAwaiter<Context>{ context, duration };
 }
 
 #endif // XIN_BLOG_SLEEP_FOR_H

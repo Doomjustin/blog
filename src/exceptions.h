@@ -1,10 +1,9 @@
 #ifndef BLOG_EXCEPTIONS_H
 #define BLOG_EXCEPTIONS_H
 
+#include <expected>
 #include <format>
 #include <system_error>
-#include <expected>
-
 
 template<typename... Args>
 void throw_system_error(int error, std::format_string<Args...> fmt, Args&&... args)
