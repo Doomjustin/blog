@@ -170,11 +170,13 @@ auto shutdown_monitor(IOContext& context) -> Task<void>
 auto demo(IOContext& context) -> Task<void>
 {
     using namespace std::chrono_literals;
-    spdlog::info("before sleep...");    
-    
-    co_await sleep_for(context, 10min);
+    spdlog::info("demo started");    
 
-    spdlog::info("after sleep...");
+    // 模拟一些持续的异步工作，直到接收到退出信号
+    while (true) 
+        co_await sleep_for(context, 1s);
+
+    spdlog::info("demo completed");
 }
 
 int main(int argc, char* argv[])

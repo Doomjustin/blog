@@ -26,7 +26,7 @@ public:
         using namespace std::chrono;
         // 转换 std::chrono 时间为内核认识的 timespec
         timeout_.tv_sec = duration_cast<seconds>(d).count();
-        timeout_.tv_nsec = duration_cast<nanoseconds>(d % seconds(1)).count();
+        timeout_.tv_nsec = duration_cast<nanoseconds>(d % 1s).count();
     }
 
     [[nodiscard]]
