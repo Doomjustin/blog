@@ -47,7 +47,7 @@ public:
                 ++count;
 
                 if (cqe->user_data != 0) {
-                    auto* op = reinterpret_cast<Operation*>(cqe->user_data);
+                    auto* op = static_cast<Operation*>(io_uring_cqe_get_data(cqe));
                     op->complete(cqe->res, cqe->flags);
                 }
             }

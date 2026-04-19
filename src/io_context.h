@@ -14,6 +14,7 @@
 #include "operation.h"
 
 // 只支持 core per thread 模型，所以io_context本身不需要考虑线程安全问题
+// 保持最新版本的实现
 class IOContext {
 public:
     explicit IOContext(unsigned entries = 1024)
