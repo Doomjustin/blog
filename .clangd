@@ -1,0 +1,25 @@
+CompileFlags:
+  CompilationDatabase: build
+
+Index:
+  Background: Build
+
+Diagnostics:
+  ClangTidy: 
+    Add: 
+      - "modernize-*"
+      - "performance-*"
+      - "readability-*"
+    Remove: 
+      - "readability-magic-numbers"
+      - "readability-braces-around-statements"
+      - "readability-implicit-bool-conversion"
+      - "readability-make-member-function-const"
+      - "readability-identifier-length"
+      - "readability-math-missing-parentheses"
+      - "readability-convert-member-functions-to-static"
+
+InlayHints:
+  Enabled: true
+  ParameterNames: true
+  DeducedTypes: true

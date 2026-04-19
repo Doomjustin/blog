@@ -1,0 +1,59 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+*.0
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# make
+Makefile
+Makefile.in
+
+# IDE
+.cache/
+.vs/
+.idea/
+
+# build
+build*/
+cmake-build*/
+out/
+
+# vcpkg
+vcpkg/
+.vcpkg-cache/
+.ci-libcxx-modules/
+
+# py
+__pycache__/
+.venv/
+
+# customer
+**/config.cppm

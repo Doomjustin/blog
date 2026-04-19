@@ -1,0 +1,21 @@
+{
+  "cmake.outputLogEncoding": "utf-8",
+  "editor.formatOnSave": false,
+  "clangd.path": "clangd",
+  "cmake.configureSettings": {
+    "CMAKE_TOOLCHAIN_FILE": "${env:VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+  },
+  // 需要安装 Run on Save 插件
+  "emeraldwalk.runonsave": {
+    "commands": [
+      {
+        // 保留 include 排序脚本
+        "match": "\\.(cpp|hpp|c|h|cc|cxx|cppm|ixx|mpp)$",
+        "cmd": "python3 ${workspaceRoot}/.vscode/scripts/format_includes_only.py \"${file}\"",
+        "isAsync": false
+      },
+    ]
+  },
+  "python-envs.defaultEnvManager": "ms-python.python:system",
+  "C_Cpp.intelliSenseEngine": "disabled",
+}

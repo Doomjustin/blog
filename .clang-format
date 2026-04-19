@@ -1,0 +1,36 @@
+# 通过插件在保存时只应用头文件相关的排序规则
+# Include 排序设置（重点配置）- Priority 数字越小越靠前，不同分组间空行分隔
+SortIncludes: true
+IncludeBlocks: Regroup
+IncludeCategories:
+  # 系统特定头文件（Windows, Linux, 网络、POSIX等）
+  - Regex: '^<(windows|winsock2|ws2tcpip|winbase|windef|winuser|wingdi|wincon|wincrypt|winreg|shellapi|shlobj|commdlg|commctrl|richedit|unistd|sys/.*|arpa/.*|netinet/.*|net/.*|pthread|semaphore|mqueue|aio|fcntl|dirent|pwd|grp|termios|syslog|utmp|utime|glob|wordexp|fnmatch|dlfcn|netdb|ifaddrs|poll)\.h>'
+    Priority: 3
+    CaseSensitive: false
+
+  # C 标准库头文件
+  - Regex: '^<(assert|ctype|errno|fenv|float|inttypes|iso646|limits|locale|math|setjmp|signal|stdalign|stdarg|stdatomic|stdbool|stddef|stdint|stdio|stdlib|stdnoreturn|string|tgmath|threads|time|uchar|wchar|wctype)\.h>'
+    Priority: 1
+    CaseSensitive: false
+
+  # C++ 标准库头文件（包括 C++ C 兼容头如 <cstdlib> 等）
+  - Regex: '^<(c(stdlib|errno|type|string|assert|stddef|stdint|inttypes|limits|locale|math|complex|signal|setjmp|signal|stdalign|stdarg|stdbool|stddef|stdint|stdio|tgmath|time|wchar|wctype)|print|expected|algorithm|array|atomic|bitset|charconv|chrono|codecvt|compare|complex|concepts|condition_variable|coroutine|deque|exception|execution|filesystem|format|forward_list|fstream|functional|future|initializer_list|iomanip|ios|iosfwd|iostream|istream|iterator|limits|list|locale|map|memory|memory_resource|mutex|new|numbers|numeric|optional|ostream|queue|random|ranges|ratio|regex|scoped_allocator|set|shared_mutex|source_location|span|sstream|stack|stdexcept|stop_token|streambuf|string|string_view|strstream|syncstream|system_error|thread|tuple|type_traits|typeindex|typeinfo|unordered_map|unordered_set|utility|valarray|variant|vector|version)>'
+    Priority: 2
+    CaseSensitive: false
+
+  # 知名第三方库头文件
+  - Regex: '^<(gsl|glaze|fmt|spdlog|ctre|catch|asio|boost|eigen|opencv|qt|gtk|glib|json|yaml|protobuf|grpc|curl|openssl|sqlite|mysql|postgresql|mongo|redis|kafka|aws|azure|google|liburing)'
+    Priority: 4
+    CaseSensitive: false
+  
+  # 项目内头文件
+  - Regex: '^<(sponge)'
+    Priority: 5
+    CaseSensitive: false
+
+  # 相对路径引入 最高优先级
+  - Regex: '^".*"'
+    Priority: 6
+    CaseSensitive: false
+
+IncludeIsMainRegex: '((\\.test)?)$'
