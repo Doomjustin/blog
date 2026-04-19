@@ -3,7 +3,7 @@
 
 #include "timeout_awaiter.h"
 
-template<uring_operation Operation, chrono_duration Duration>
+template<single_shot_only_operation Operation, chrono_duration Duration>
 auto timeout(Operation&& awaitable, Duration timeout) -> TimeoutAwaiter<std::decay_t<Operation>>
 {
     return TimeoutAwaiter<std::decay_t<Operation>>{ std::forward<Operation>(awaitable), timeout };

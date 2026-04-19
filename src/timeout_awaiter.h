@@ -16,7 +16,7 @@
 #include "operation.h"
 
 template<typename T>
-concept uring_operation = requires (T& op, ::io_uring_sqe* sqe, std::coroutine_handle<> handle)
+concept single_shot_only_operation = requires (T& op, ::io_uring_sqe* sqe, std::coroutine_handle<> handle)
 {
     typename T::resume_type;
 
@@ -28,7 +28,7 @@ concept uring_operation = requires (T& op, ::io_uring_sqe* sqe, std::coroutine_h
 } && std::derived_from<T, Operation>;
 
 
-template<uring_operation InnerOperation>
+template<single_shot_only_operation InnerOperation>
 class TimeoutAwaiter: public Operation {
 public:
     using resume_type = typename InnerOperation::resume_type;
@@ -49,7 +49,7 @@ public:
         return false;
     }
 
-    void await_suspend(std::coroutine_handle<> handle)
+    void await_suspend(std::coroutine_handle<> handle) noexcept
     {
         handle_ = handle;
 
@@ -64,7 +64,7 @@ public:
         ::io_uring_sqe_set_data(timeout_sqe, this);
     }
 
-    auto await_resume() -> std::expected<resume_type, std::error_code>
+    auto await_resume() noexcept -> std::expected<resume_type, std::error_code>
     {
         if (is_timed_out_)
             return unexpected_system_error(std::errc::timed_out);
@@ -77,16 +77,15 @@ public:
     {
         if (result == -ETIME)
             is_timed_out_ = true;
-        else
+        else if (result != -ECANCELED)
             result_ = result;
     }
 
     void complete(int result, std::uint32_t flags) noexcept override
     {
-        if (!has_result_) {
-            set_result(result, flags);
-            has_result_ = true;
-            
+        set_result(result, flags);
+
+        if (--pending_cqes_ == 0) {
             auto handle = std::exchange(handle_, {});
             handle.resume();
         }
@@ -102,7 +101,9 @@ private:
     __kernel_timespec timeout_;
 
     std::coroutine_handle<> handle_;
-    bool has_result_{ false };
+    // 必须保证2个CQE都完成了才resume协程，因为可能存在一种情况：
+    // timeout先完成了，此时需要等到io操作完成后才能resume协程，否则就会丢失io操作的结果
+    int pending_cqes_{ 2 };
     bool is_timed_out_{ false };
     int result_{ -ECANCELED };
 };
