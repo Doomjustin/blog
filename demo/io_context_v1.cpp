@@ -17,7 +17,7 @@ public:
     explicit IOContext(unsigned entries = 1024)
     {
         if (auto res = ::io_uring_queue_init(entries, &ring_, 0); res < 0)
-            throw_system_error(res, "io_uring_queue_init");            
+            throw_system_error(-res, "io_uring_queue_init");            
     }
 
     IOContext(const IOContext&) = delete;
@@ -38,8 +38,7 @@ public:
 
         while (!stopped_.load(std::memory_order_relaxed) && outstanding_works_ > 0)
         {
-            auto res = ::io_uring_submit_and_wait(&ring_, 1);
-            if (res < 0)
+            if (::io_uring_submit_and_wait(&ring_, 1) < 0)
                 throw_system_error("io_uring_submit_and_wait");
 
             unsigned head;

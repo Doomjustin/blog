@@ -28,4 +28,9 @@ auto unexpected_system_error(std::errc ec) -> std::unexpected<std::error_code>
     return std::unexpected{ std::make_error_code(ec) };
 }
 
+auto unexpected_system_error(int error) -> std::unexpected<std::error_code>
+{
+    return std::unexpected{ std::error_code{ error, std::system_category() } };
+}
+
 #endif // BLOG_EXCEPTIONS_H
