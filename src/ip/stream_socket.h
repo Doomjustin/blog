@@ -44,7 +44,7 @@ public:
     {}
 
     StreamSocket(StreamSocket&&) = default;
-    StreamSocket& operator=(StreamSocket&&) = default;
+    auto operator=(StreamSocket&&) -> StreamSocket& = default;
 
     ~StreamSocket() = default;
 

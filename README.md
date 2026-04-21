@@ -9,3 +9,4 @@
 - [03_基于链式请求的零开销超时机制](docs/03_基于链式请求的零开销超时机制.md)
 - [04_核心IO操作的协程实现](docs/04_核心IO操作的协程实现.md)
 - [05_Protocol与Endpoint的封装](docs/05_Protocol与Endpoint的封装.md)
+- [06_socket层次化封装](docs/06_socket层次化封装.md)
