@@ -1,11 +1,14 @@
 #ifndef BLOG_IP_ENDPOINT_H
 #define BLOG_IP_ENDPOINT_H
 
+#include <cstring>
+#include <ostream>
+
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <sys/socket.h>
 
 #include "address.h"
-#include "overloads.h"
 
 namespace ip {
 
@@ -13,104 +16,93 @@ template<typename Protocol>
 class BasicEndpoint {
 public:
     using protocol_type = Protocol;
-    
+
     using address_type = Address;
 
-    using port_type = in_port_t;
-    
-    BasicEndpoint() = default;
-
-    BasicEndpoint(const protocol_type& protocol, port_type port)
+    BasicEndpoint()
     {
-        if (protocol.family() == AF_INET) {
-            sockaddr_in endpoint{};
-            endpoint.sin_family = AF_INET;
-            endpoint.sin_port = ::htons(port);
-            endpoint.sin_addr.s_addr = ::htonl(INADDR_ANY);
-            endpoint_ = endpoint;
+        std::memset(&data_, 0, sizeof(data_));
+        data_.storage.ss_family = AF_INET;
+    }
+
+    BasicEndpoint(const protocol_type& protocol, in_port_t port)
+    {
+        std::memset(&data_, 0, sizeof(data_));
+
+        if (protocol.domain() == AF_INET) {
+            data_.storage.ss_family = AF_INET;
+            data_.v4.sin_family = AF_INET;
+            data_.v4.sin_port = ::htons(port);
+            data_.v4.sin_addr.s_addr = ::htonl(INADDR_ANY);
         }
         else {
-            sockaddr_in6 endpoint{};
-            endpoint.sin6_family = AF_INET6;
-            endpoint.sin6_port = ::htons(port);
-            endpoint.sin6_addr = in6addr_any;
-            endpoint_ = endpoint;
+            data_.storage.ss_family = AF_INET6;
+            data_.v6.sin6_family = AF_INET6;
+            data_.v6.sin6_port = ::htons(port);
+            data_.v6.sin6_addr = in6addr_any;
         }
     }
 
-    BasicEndpoint(const address_type& address, port_type port)
+    BasicEndpoint(const address_type& address, in_port_t port)
     {
+        std::memset(&data_, 0, sizeof(data_));
+        
         if (address.is_v4()) {
-            sockaddr_in endpoint{};
-            endpoint.sin_family = AF_INET;
-            endpoint.sin_port = ::htons(port);
-            endpoint.sin_addr = address.to_v4().address;
-            endpoint_ = endpoint;
+            data_.storage.ss_family = AF_INET;
+            data_.v4.sin_family = AF_INET;
+            data_.v4.sin_port = ::htons(port);
+            data_.v4.sin_addr = address.to_v4().address;
         }
         else {
-            sockaddr_in6 endpoint{};
-            endpoint.sin6_family = AF_INET6;
-            endpoint.sin6_port = ::htons(port);
-            endpoint.sin6_addr = address.to_v6().address;
-            endpoint_ = endpoint;
+            data_.storage.ss_family = AF_INET6;
+            data_.v6.sin6_family = AF_INET6;
+            data_.v6.sin6_port = ::htons(port);
+            data_.v6.sin6_addr = address.to_v6().address;
         }
     }
 
     [[nodiscard]]
     auto address() const noexcept -> Address
     {
-        return std::visit(Overload{
-            [](const sockaddr_in& endpoint) -> Address 
-            {
-                AddressV4 address;
-                address.address = endpoint.sin_addr;
-                return Address{ address };
-            },
-            [](const sockaddr_in6& endpoint) -> Address 
-            {
-                AddressV6 address;
-                address.address = endpoint.sin6_addr;
-                return Address{ address };
-            }
-        }, endpoint_);
+        if (data_.storage.ss_family == AF_INET)
+            return Address{ AddressV4::from_addr(data_.v4.sin_addr) };
+
+        return Address{ AddressV6::from_addr(data_.v6.sin6_addr) };
     }
 
     [[nodiscard]]
-    auto port() const noexcept -> port_type
+    auto port() const noexcept -> in_port_t
     {
-        return std::visit(Overload{
-            [](const sockaddr_in& endpoint) -> port_type 
-            {
-                return ::ntohs(endpoint.sin_port);
-            },
-            [](const sockaddr_in6& endpoint) -> port_type 
-            {
-                return ::ntohs(endpoint.sin6_port);
-            }
-        }, endpoint_);
+        if (data_.storage.ss_family == AF_INET)
+            return ::ntohs(data_.v4.sin_port);
+
+        return ::ntohs(data_.v6.sin6_port);
     }
 
     auto data() noexcept -> sockaddr*
     {
-        return reinterpret_cast<sockaddr*>(&endpoint_);
+        return reinterpret_cast<sockaddr*>(&data_);
     }
 
     [[nodiscard]]
     auto data() const noexcept -> const sockaddr*
     {
-        return reinterpret_cast<const sockaddr*>(&endpoint_);
+        return reinterpret_cast<const sockaddr*>(&data_);
     }
 
     [[nodiscard]]
     constexpr auto capacity() const noexcept -> socklen_t
     {
-        return sizeof(endpoint_);
+        return sizeof(sockaddr_storage);
     }
 
     [[nodiscard]]
     constexpr auto size() const noexcept -> socklen_t
     {
-        return sizeof(endpoint_);
+        if (data_.storage.ss_family == AF_INET)
+            return sizeof(sockaddr_in);
+
+        return sizeof(sockaddr_in6);
     }
 
     void resize(socklen_t new_size) noexcept
@@ -120,20 +112,30 @@ public:
 
     auto protocol() const noexcept -> protocol_type
     {
-        if (std::holds_alternative<sockaddr_in>(endpoint_))
+        if (data_.storage.ss_family == AF_INET)
             return protocol_type::v4();
 
         return protocol_type::v6();
     }
 
-    static auto from_string(std::string_view address, port_type port) -> BasicEndpoint
+    static auto from_string(std::string_view address, in_port_t port) -> BasicEndpoint
     {
         return BasicEndpoint{ address_type::from_string(address), port };
     }
 
 private:
-    std::variant<sockaddr_in, sockaddr_in6> endpoint_;
+    union AddressType {
+        sockaddr_storage storage; // 确保足够大以容纳任何地址类型
+        sockaddr_in v4;
+        sockaddr_in6 v6;
+    } data_;
 };
+
+template<typename Protocol>
+auto operator<<(std::ostream& os, const BasicEndpoint<Protocol>& endpoint) -> std::ostream&
+{
+    return os << endpoint.address() << ":" << endpoint.port();
+}
 
 } // namespace ip
 

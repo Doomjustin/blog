@@ -5,6 +5,7 @@
 #include <compare>
 #include <cstdint>
 #include <cstring>
+#include <ostream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -75,6 +76,13 @@ struct AddressV4 {
 
         return result;
     }
+
+    static auto from_addr(const in_addr& addr) -> AddressV4
+    {
+        AddressV4 result;
+        result.address.s_addr = addr.s_addr;
+        return result;
+    }
 };
 
 
@@ -132,6 +140,13 @@ struct AddressV6 {
         if (res != 1)
             throw_system_error("Failed to convert string to IPv6 address");
 
+        return result;
+    }
+
+    static auto from_addr(const in6_addr& addr) -> AddressV6
+    {
+        AddressV6 result;
+        std::memcpy(result.address.s6_addr, addr.s6_addr, 16);
         return result;
     }
 };
@@ -214,6 +229,13 @@ public:
 private:
     address_type address_;
 };
+
+
+auto operator<<(std::ostream& os, const Address& address) -> std::ostream&
+{
+    os << address.to_string();
+    return os;
+}
 
 } // namespace ip
 

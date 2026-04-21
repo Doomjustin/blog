@@ -1,6 +1,7 @@
 #include "ip/tcp.h"
 
 #include <cstdlib>
+#include <iostream>
 
 #include <spdlog/spdlog.h>
 
@@ -42,6 +43,8 @@ auto echo(IOContext& context) -> Task<>
 {
     // auto endpoint = ip::tcp::endpoint::from_string("127.0.0.1", 12345);
     auto endpoint = ip::tcp::endpoint{ ip::AddressV6::loopback(), 12345 };
+    std::cout << "Server listening on " << endpoint << "\n";
+
     auto acceptor = ip::tcp::acceptor{ context, endpoint };
 
     while (true) {
