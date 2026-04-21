@@ -5,99 +5,89 @@
 #include <netinet/in.h>
 
 #include "address.h"
-#include "protocol.h"
+#include "overloads.h"
 
 namespace ip {
-
-template<int Domain>
-struct AddressTraits;
-
-template<>
-struct AddressTraits<domain::ipv4> {
-    using address_type = AddressV4;
-    using port_type = in_port_t;
-    using endpoint_type = sockaddr_in;
-
-    static auto cast(const address_type& address, port_type port) -> endpoint_type
-    {
-        sockaddr_in endpoint{};
-        endpoint.sin_family = AF_INET;
-        endpoint.sin_port = ::htons(port);
-        endpoint.sin_addr = address.address;    
-        return endpoint;
-    }
-
-    static auto address(const endpoint_type& endpoint) -> address_type
-    {
-        address_type address{};
-        address.address = endpoint.sin_addr;
-        return address;
-    }
-
-    static auto port(const endpoint_type& endpoint) -> port_type
-    {
-        return ::ntohs(endpoint.sin_port);
-    }
-};
-
-template<>
-struct AddressTraits<domain::ipv6> {
-    using address_type = AddressV6;
-    using port_type = in_port_t;
-    using endpoint_type = sockaddr_in6;
-
-    static auto cast(const address_type& address, port_type port) -> endpoint_type
-    {
-        sockaddr_in6 endpoint{};
-        endpoint.sin6_family = AF_INET6;
-        endpoint.sin6_port = ::htons(port);
-        endpoint.sin6_addr = address.address;
-        return endpoint;
-    }
-
-    static auto address(const endpoint_type& endpoint) -> address_type
-    {
-        address_type address{};
-        address.address = endpoint.sin6_addr;
-        return address;
-    }
-
-    static auto port(const endpoint_type& endpoint) -> port_type
-    {
-        return ::ntohs(endpoint.sin6_port);
-    }
-};
-
 
 template<typename Protocol>
 class BasicEndpoint {
 public:
     using protocol_type = Protocol;
+    
+    using address_type = Address;
 
-    static constexpr auto domain = Protocol::domain;
-
-    using address_type = typename AddressTraits<domain>::address_type;
-
-    using port_type = typename AddressTraits<domain>::port_type;
-
-    using endpoint_type = typename AddressTraits<domain>::endpoint_type;
-
-    using traits = AddressTraits<domain>;
-
+    using port_type = in_port_t;
+    
     BasicEndpoint() = default;
 
-    BasicEndpoint(const address_type& address, port_type port)
-      : endpoint_{ traits::cast(address, port) }
-    {}
-
-    auto address() const noexcept -> address_type
+    BasicEndpoint(const protocol_type& protocol, port_type port)
     {
-        return traits::address(endpoint_);
+        if (protocol.family() == AF_INET) {
+            sockaddr_in endpoint{};
+            endpoint.sin_family = AF_INET;
+            endpoint.sin_port = ::htons(port);
+            endpoint.sin_addr.s_addr = ::htonl(INADDR_ANY);
+            endpoint_ = endpoint;
+        }
+        else {
+            sockaddr_in6 endpoint{};
+            endpoint.sin6_family = AF_INET6;
+            endpoint.sin6_port = ::htons(port);
+            endpoint.sin6_addr = in6addr_any;
+            endpoint_ = endpoint;
+        }
     }
 
+    BasicEndpoint(const address_type& address, port_type port)
+    {
+        if (address.is_v4()) {
+            sockaddr_in endpoint{};
+            endpoint.sin_family = AF_INET;
+            endpoint.sin_port = ::htons(port);
+            endpoint.sin_addr = address.to_v4().address;
+            endpoint_ = endpoint;
+        }
+        else {
+            sockaddr_in6 endpoint{};
+            endpoint.sin6_family = AF_INET6;
+            endpoint.sin6_port = ::htons(port);
+            endpoint.sin6_addr = address.to_v6().address;
+            endpoint_ = endpoint;
+        }
+    }
+
+    [[nodiscard]]
+    auto address() const noexcept -> Address
+    {
+        return std::visit(Overload{
+            [](const sockaddr_in& endpoint) -> Address 
+            {
+                AddressV4 address;
+                address.address = endpoint.sin_addr;
+                return Address{ address };
+            },
+            [](const sockaddr_in6& endpoint) -> Address 
+            {
+                AddressV6 address;
+                address.address = endpoint.sin6_addr;
+                return Address{ address };
+            }
+        }, endpoint_);
+    }
+
+    [[nodiscard]]
     auto port() const noexcept -> port_type
     {
-        return traits::port(endpoint_);
+        return std::visit(Overload{
+            [](const sockaddr_in& endpoint) -> port_type 
+            {
+                return ::ntohs(endpoint.sin_port);
+            },
+            [](const sockaddr_in6& endpoint) -> port_type 
+            {
+                return ::ntohs(endpoint.sin6_port);
+            }
+        }, endpoint_);
     }
 
     auto data() noexcept -> sockaddr*
@@ -128,23 +118,21 @@ public:
         // Endpoint size is fixed by protocol, ignore resize requests.
     }
 
+    auto protocol() const noexcept -> protocol_type
+    {
+        if (std::holds_alternative<sockaddr_in>(endpoint_))
+            return protocol_type::v4();
+
+        return protocol_type::v6();
+    }
+
     static auto from_string(std::string_view address, port_type port) -> BasicEndpoint
     {
         return BasicEndpoint{ address_type::from_string(address), port };
     }
 
-    static auto loopback(port_type port) -> BasicEndpoint
-    {
-        return BasicEndpoint{ address_type::loopback(), port };
-    }
-
-    static auto any(port_type port) -> BasicEndpoint
-    {
-        return BasicEndpoint{ address_type::any(), port };
-    }
-
 private:
-    endpoint_type endpoint_;
+    std::variant<sockaddr_in, sockaddr_in6> endpoint_;
 };
 
 } // namespace ip

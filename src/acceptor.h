@@ -8,39 +8,45 @@
 #include "socket.h"
 
 template<typename Protocol, typename Endpoint>
-concept acceptable_protocol = is_same_protocol<Protocol, Endpoint> 
-                           && connection_oriented_protocol<Protocol>;
+concept acceptable_protocol = is_same_protocol<Protocol, Endpoint>;
 
 
-template<typename Context, typename Protocol>
-class BasicAcceptor: public BaseSocket<Context, Protocol> {
+template<typename Protocol, typename Context>
+class BasicAcceptor: public BaseSocket<Protocol, Context> {
 public:
-    using socket_type = typename Protocol::socket;
+    using socket_type = typename Protocol::template socket<Context>;
     using endpoint_type = typename Protocol::endpoint;
+    using base_type = BaseSocket<Protocol, Context>;
 
-    explicit BasicAcceptor(Context& context)
-      : BaseSocket<Context, Protocol>{ context }
+    using reuse_address = BooleanOption<SOL_SOCKET, SO_REUSEADDR>;
+    
+#ifdef SO_REUSEPORT
+    using reuse_port = BooleanOption<SOL_SOCKET, SO_REUSEPORT>;
+#endif
+
+    explicit BasicAcceptor(Context& context, const Protocol& protocol = Protocol{})
+      : base_type{ context, protocol }
     {}
 
     BasicAcceptor(Context& context, const endpoint_type& endpoint)
-      : BaseSocket<Context, Protocol>{ context }
+      : base_type{ context, endpoint.protocol() }
     {
-        this->option(typename Protocol::acceptor::reuse_address{ true });
+        this->option(reuse_address{ true });
 
-        this->bind(endpoint);
-        this->listen(DEFAULT_LISTEN_BACKLOG);
+        bind(endpoint);
+        listen(DEFAULT_LISTEN_BACKLOG);
     }
 
-    BasicAcceptor(Context& context, const endpoint_type& endpoint, bool reuse_port)
-      : BaseSocket<Context, Protocol>{ context }
+    BasicAcceptor(Context& context, const endpoint_type& endpoint, bool enable_reuse_port)
+      : base_type{ context, endpoint.protocol() }
     {
-        this->option(typename Protocol::acceptor::reuse_address{ true });
+        this->option(reuse_address{ true });
 
-        if (reuse_port)
-            this->option(typename Protocol::acceptor::reuse_port{ true });
+        if (enable_reuse_port)
+            this->option(reuse_port{ true });
 
-        this->bind(endpoint);
-        this->listen(DEFAULT_LISTEN_BACKLOG);
+        bind(endpoint);
+        listen(DEFAULT_LISTEN_BACKLOG);
     }
 
 
@@ -82,25 +88,26 @@ public:
         return socket_type{ this->context(), client };
     }
 
-    auto async_accept() noexcept -> AcceptAwaiter<Context, Protocol>
+    auto async_accept() noexcept -> AcceptAwaiter<Protocol, Context>
     {
-        return AcceptAwaiter<Context, Protocol>{ context(), native_handle() };
+        return AcceptAwaiter<Protocol, Context>{ context(), native_handle() };
     }
 
-    auto async_accept(endpoint_type& endpoint) noexcept -> AcceptAwaiter<Context, Protocol>
+    auto async_accept(endpoint_type& endpoint) noexcept -> AcceptAwaiter<Protocol, Context>
+        requires acceptable_protocol<Protocol, typename Protocol::endpoint>
     {
-        return AcceptAwaiter<Context, Protocol>{ context(), native_handle(), &endpoint };
+        return AcceptAwaiter<Protocol, Context>{ context(), native_handle(), &endpoint };
     }
 
     auto context() noexcept -> Context& 
     { 
-        return this->context(); 
+        return base_type::context(); 
     }
 
     [[nodiscard]]
     constexpr auto native_handle() const noexcept -> int
     {
-        return this->native_handle();
+        return base_type::native_handle();
     }
 
 private:

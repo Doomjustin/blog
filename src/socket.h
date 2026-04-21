@@ -13,39 +13,33 @@
 #include "option.h"
 
 template <typename T>
-concept has_domain = requires 
+concept has_domain = requires (const T& t)
 { 
-    { T::domain } -> std::convertible_to<int>;
+    { t.domain() } -> std::convertible_to<int>;
 };
 
 template <typename T>
-concept has_type = requires 
+concept has_type = requires (const T& t)
 { 
-    { T::type } -> std::convertible_to<int>;
+    { t.type() } -> std::convertible_to<int>;
 };
 
 template <typename T>
-concept has_protocol = requires
+concept has_protocol = requires (const T& t)
 {
-    { T::protocol } -> std::convertible_to<int>;
+    { t.protocol() } -> std::convertible_to<int>;
 };
 
 template <typename T>
 concept socket_protocol = has_domain<T> && has_type<T> && has_protocol<T>;
 
 
-template<typename Context, socket_protocol Protocol>
+template<socket_protocol Protocol, typename Context>
 class BaseSocket {
 public:
-    static constexpr int domain = Protocol::domain;
-    static constexpr int type = Protocol::type;
-    static constexpr int protocol = Protocol::protocol;
+    using context_type = Context;
 
-    using reuse_address = BooleanOption<SOL_SOCKET, SO_REUSEADDR>;
-    
-#ifdef SO_REUSEPORT
-    using reuse_port = BooleanOption<SOL_SOCKET, SO_REUSEPORT>;
-#endif
+    using protocol_type = Protocol;
 
     using error = BooleanOption<SOL_SOCKET, SO_ERROR>;
 
@@ -59,17 +53,17 @@ public:
     
     using close_on_exec = FlagOption<F_GETFD, F_SETFD, FD_CLOEXEC>;
 
-    BaseSocket(Context& context)
-      : fd_{ create(domain, type, protocol) }, 
-        context_{ &context }
+    BaseSocket(Context& context, const Protocol& protocol)
+      : context_{ &context }, 
+        fd_{ create(protocol) }
     {}
 
     BaseSocket(const BaseSocket&) = delete;
     auto operator=(const BaseSocket&) -> BaseSocket& = delete;
 
     BaseSocket(BaseSocket&& other) noexcept
-      : fd_{ std::exchange(other.fd_, INVALID_SOCKET) },
-        context_{ std::exchange(other.context_, nullptr) }
+      : context_{ std::exchange(other.context_, nullptr) }, 
+        fd_{ std::exchange(other.fd_, INVALID_SOCKET) }
     {}
 
     auto operator=(BaseSocket&& other) noexcept -> BaseSocket&
@@ -78,8 +72,8 @@ public:
 
         close();
 
-        fd_ = std::exchange(other.fd_, INVALID_SOCKET);
         context_ = std::exchange(other.context_, nullptr);
+        fd_ = std::exchange(other.fd_, INVALID_SOCKET);
         return *this;
     }
 
@@ -174,20 +168,20 @@ public:
     }
 
 protected:
-    explicit BaseSocket(Context& context, int fd)
-      : fd_{ fd }, 
-        context_{ &context }
+    BaseSocket(Context& context, int fd)
+      : context_{ &context }, 
+        fd_{ fd }
     {}
-    
+
 private:
     static constexpr int INVALID_SOCKET = -1;
 
-    int fd_ = INVALID_SOCKET;
     Context* context_;
+    int fd_ = INVALID_SOCKET;
 
-    static auto create(int domain, int type, int protocol) -> int
+    static auto create(const Protocol& protocol) -> int
     {
-        auto res = ::socket(domain, type, protocol);
+        auto res = ::socket(protocol.domain(), protocol.type(), protocol.protocol());
         if (res == -1)
             throw_system_error("Failed to create socket");
 

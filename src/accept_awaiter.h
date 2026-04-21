@@ -10,14 +10,15 @@
 #include "exceptions.h"
 #include "operation.h"
 
-template<typename Context, typename Protocol>
+template<typename Protocol, typename Context>
 class AcceptAwaiter: public Operation {
 public:
-    using socket_type = typename Protocol::socket;
+    using socket_type = typename Protocol::template socket<Context>;
     using endpoint_type = typename Protocol::endpoint;
+    using context_type = Context;
     using resume_type = socket_type;
 
-    AcceptAwaiter(Context& context, int fd, endpoint_type* peer = nullptr)
+    AcceptAwaiter(context_type& context, int fd, endpoint_type* peer = nullptr)
       : context_{ context }, fd_{ fd }, peer_{ peer }
     {
         if (peer_)
@@ -34,7 +35,7 @@ public:
     {
         handle_ = handle;
 
-        auto* sqe = context_.get_sqe();
+        auto* sqe = context_.sqe();
         
         prepare(sqe);
         ::io_uring_sqe_set_data(sqe, this);
@@ -45,7 +46,7 @@ public:
         if (error_code_ != 0)
             return unexpected_system_error(error_code_);
 
-        return resume_type{ result_fd_, context_ };
+        return resume_type{ context_, result_fd_ };
     }
 
     void prepare(::io_uring_sqe* sqe) noexcept
@@ -76,10 +77,10 @@ public:
         }
     }
 
-    auto context() noexcept -> Context& { return context_; }
+    auto context() noexcept -> context_type& { return context_; }
 
 private:
-    Context& context_;
+    context_type& context_;
     int fd_;
     endpoint_type* peer_;
     socklen_t addrlen_;

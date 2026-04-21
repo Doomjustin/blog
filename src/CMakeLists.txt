@@ -20,16 +20,3 @@ target_link_libraries(blog
         PkgConfig::liburing
         PkgConfig::jemalloc
 )
-
-# if(BUILD_TESTING AND ${PROJECT_NAME}_BUILD_TESTS)
-#     add_executable(blog.test ${BLOG_TEST_SOURCE})
-
-#     target_link_libraries(blog.test
-#         PRIVATE
-#             Catch2::Catch2WithMain
-#     )
-
-#     target_compile_features(blog.test PRIVATE cxx_std_23)
-
-#     add_test(NAME blog.test COMMAND blog.test)
-# endif()

@@ -6,16 +6,17 @@
 #include <sys/socket.h>
 
 #include "operations.h"
-#include "protocol.h"
 #include "readsome_awaiter.h"
 #include "socket.h"
+#include "writesome_awaiter.h"
 
 namespace ip {
 
-template<typename Context, typename Protocol>
-    requires is_same_protocol<Protocol, typename Protocol::endpoint>
-class StreamSocket: public BaseSocket<Context, Protocol> {
+template<typename Protocol, typename Context>
+class StreamSocket: public BaseSocket<Protocol, Context> {
 public:
+    using base_socket_type = BaseSocket<Protocol, Context>;
+
     using endpoint_type = typename Protocol::endpoint;
 
     using how = operations::ShutdownHow;
@@ -31,12 +32,19 @@ public:
     using no_delay = BooleanOption<IPPROTO_TCP, TCP_NODELAY>;
 
     explicit StreamSocket(Context& context)
-      : BaseSocket<Context, Protocol>{ context }
+      : base_socket_type{ context, Protocol{} }
+    {}
+
+    StreamSocket(Context& context, const Protocol& protocol)
+      : base_socket_type{ context, protocol }
     {}
 
     StreamSocket(Context& context, int fd)
-      : BaseSocket<Context, Protocol>{ context, fd }
+      : base_socket_type{ context, fd }
     {}
+
+    StreamSocket(StreamSocket&&) = default;
+    StreamSocket& operator=(StreamSocket&&) = default;
 
     ~StreamSocket() = default;
 
@@ -68,10 +76,11 @@ public:
         return ReadSomeAwaiter<Context>{ this->context(), this->native_handle(), buffer };
     }
 
-    // auto async_write_some(std::span<const std::byte> buffer) noexcept -> WriteSomeAwaiter
-    // {
-    //     return WriteSomeAwaiter{ this->context(), this->native_handle(), buffer };
-    // }
+    auto async_write_some(std::span<const std::byte> buffer) noexcept 
+        -> WriteSomeAwaiter<Context>
+    {
+        return WriteSomeAwaiter<Context>{ this->context(), this->native_handle(), buffer };
+    }
 };
 
 } // namespace ip
