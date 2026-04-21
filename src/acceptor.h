@@ -78,7 +78,7 @@ public:
         -> std::expected<socket_type, std::error_code>
         requires acceptable_protocol<Protocol, typename Protocol::endpoint>
     {
-        auto len = endpoint.size();
+        auto len = endpoint.capacity();
         auto client = ::accept(this->native_handle(), endpoint.data(), &len);
         if (client == -1)
             return unexpected_system_error();

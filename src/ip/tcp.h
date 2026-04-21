@@ -30,13 +30,13 @@ public:
     }
 
     [[nodiscard]]
-    constexpr auto type() const noexcept -> int
+    consteval auto type() const noexcept -> int
     {
         return SOCK_STREAM;
     }
 
     [[nodiscard]]
-    constexpr auto protocol() const noexcept -> int
+    consteval auto protocol() const noexcept -> int
     {
         return IPPROTO_TCP;
     }
