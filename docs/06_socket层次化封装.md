@@ -1,13 +1,3 @@
-这次的补充非常精彩！引入 `buffer()` 工厂函数完美契合了 C++20 的核心设计哲学：**在底层保持接口的极致纯粹（`std::span`），在表层利用泛型和 Concept 提供极佳的调用体验（Ergonomics），且全程维持零开销抽象。** 这也是现代网络库（如 Asio）处理缓冲区类型擦除的标准做法。
-
-我为你补全了留空的示例代码，并对你新增的 `buffer()` 部分进行了连贯性与专业性的语境润色，使其与上下文的架构探讨无缝融合。同时，修正了结尾处因复制产生的不正确的外部链接。
-
-你可以直接使用以下最终版本：
-
------
-
-# 基于 io\_uring 的 C++20 协程网络库 (六)：Socket 的类型安全与层次化封装
-
 在构建了底层的异步轮询引擎（`IOContext`）、协程机制以及端点（`Endpoint`）的内存布局后，我们进入网络编程的核心实体：套接字（Socket）。
 
 在早期的概念验证阶段（第四篇博客中），为了快速验证系统可行性，我们曾实现过一个简陋的 `Socket` 类，将描述符的创建、`bind`、`listen`、`accept`、`read` 和 `write` 糅合在一个结构中。
@@ -43,26 +33,15 @@ POSIX 系统为网络通信提供了极度灵活但也极其松散的 C API。�
 我们使用 C++20 的 Concept 来定义这一显式契约：
 
 ```cpp
-#include <concepts>
-
-// src/socket.h
 template <typename T>
-concept has_domain = requires (const T& t) { 
+concept socket_protocol = requires (const T& t)
+{
+    T::endpoint_type;
+
     { t.domain() } -> std::convertible_to<int>;
-};
-
-template <typename T>
-concept has_type = requires (const T& t) { 
     { t.type() } -> std::convertible_to<int>;
-};
-
-template <typename T>
-concept has_protocol = requires (const T& t) {
     { t.protocol() } -> std::convertible_to<int>;
 };
-
-template <typename T>
-concept socket_protocol = has_domain<T> && has_type<T> && has_protocol<T>;
 ```
 
 引入 `socket_protocol` 约束后，任何不满足规范的自定义协议类型在实例化 Socket 时，编译器都会提供精确的诊断信息。

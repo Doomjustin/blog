@@ -6,6 +6,15 @@
 
 #include <sys/socket.h>
 
+/**
+ * @brief Model the `SO_LINGER` socket option controlling close behavior.
+ *
+ * When linger is enabled with a non-zero timeout, `close(2)` blocks until
+ * all pending data is sent or the timeout expires. With a zero timeout,
+ * the connection is reset immediately. Disabling linger restores the
+ * default behavior where `close(2)` returns immediately and the kernel
+ * drains data in the background.
+ */
 class LingerOption {
 public:
     static constexpr int level = SOL_SOCKET;
@@ -14,6 +23,12 @@ public:
 
     LingerOption() = default;
 
+    /**
+     * @brief Construct with explicit linger policy.
+     *
+     * @param on      Enable linger behavior.
+     * @param timeout Linger duration in seconds when `on` is true.
+     */
     explicit LingerOption(bool on, int timeout) 
       : value_{ .l_onoff=on ? 1 : 0, .l_linger=timeout } 
     {}

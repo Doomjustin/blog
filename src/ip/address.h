@@ -19,6 +19,12 @@
 
 namespace ip {
 
+/**
+ * @brief IPv4 address value type backed by `in_addr`.
+ *
+ * Provides factory methods, string conversion, and total ordering so
+ * addresses can be used as map keys and printed directly.
+ */
 struct AddressV4 {
     using byte_type = std::array<std::uint8_t, 4>;
     using address_type = in_addr;
@@ -27,6 +33,11 @@ struct AddressV4 {
 
     AddressV4() = default;
 
+    /**
+     * @brief Construct from a four-byte array in network byte order.
+     *
+     * @param bytes Raw IPv4 bytes, most significant first (e.g. `{192,168,1,1}`).
+     */
     constexpr AddressV4(const byte_type& bytes)
     {
         address.s_addr = std::bit_cast<std::uint32_t>(bytes);
@@ -52,21 +63,30 @@ struct AddressV4 {
         return ::ntohl(address.s_addr) <=> ::ntohl(other.address.s_addr);
     }
 
+    /** @brief Return the wildcard address `0.0.0.0` (binds to all interfaces). */
     static constexpr auto any() noexcept -> AddressV4
     {
         return {{ 0, 0, 0, 0 }};
     }
 
+    /** @brief Return the loopback address `127.0.0.1`. */
     static constexpr auto loopback() noexcept -> AddressV4
     {
         return {{ 127, 0, 0, 1 }};
     }
 
+    /** @brief Return the limited broadcast address `255.255.255.255`. */
     static constexpr auto broadcast() noexcept -> AddressV4
     {
         return {{ 255, 255, 255, 255 }};
     }
 
+    /**
+     * @brief Parse a dotted-decimal string into an `AddressV4`.
+     *
+     * @param address Dotted-decimal string (e.g. `"192.168.1.1"`).
+     * @throws std::system_error If `inet_pton` fails.
+     */
     static auto from_string(std::string_view address) -> AddressV4
     {
         AddressV4 result;
@@ -77,6 +97,9 @@ struct AddressV4 {
         return result;
     }
 
+    /**
+     * @brief Construct from an existing `in_addr` (e.g. from `accept(2)`).
+     */
     static auto from_addr(const in_addr& addr) -> AddressV4
     {
         AddressV4 result;
@@ -86,6 +109,12 @@ struct AddressV4 {
 };
 
 
+/**
+ * @brief IPv6 address value type backed by `in6_addr`.
+ *
+ * Provides factory methods, string conversion, and total ordering
+ * for IPv6 addresses.
+ */
 struct AddressV6 {
     using byte_type = std::array<std::uint8_t, 16>;
     using address_type = in6_addr;
@@ -94,6 +123,11 @@ struct AddressV6 {
 
     AddressV6() = default;
 
+    /**
+     * @brief Construct from a sixteen-byte array in network byte order.
+     *
+     * @param bytes Raw IPv6 bytes.
+     */
     constexpr AddressV6(const byte_type& bytes)
     {
         std::ranges::copy(bytes, address.s6_addr);
@@ -123,16 +157,24 @@ struct AddressV6 {
         return std::strong_ordering::equal;
     }
 
+    /** @brief Return the unspecified address `::` (binds to all interfaces). */
     static constexpr auto any() noexcept -> AddressV6
     {
         return {{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }};
     }
 
+    /** @brief Return the loopback address `::1`. */
     static constexpr auto loopback() noexcept -> AddressV6
     {
         return {{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 }};
     }
 
+    /**
+     * @brief Parse a colon-hex string into an `AddressV6`.
+     *
+     * @param address Colon-hex string (e.g. `"::1"`).
+     * @throws std::system_error If `inet_pton` fails.
+     */
     static auto from_string(std::string_view address) -> AddressV6
     {
         AddressV6 result;
@@ -143,6 +185,9 @@ struct AddressV6 {
         return result;
     }
 
+    /**
+     * @brief Construct from an existing `in6_addr` (e.g. from `accept(2)`).
+     */
     static auto from_addr(const in6_addr& addr) -> AddressV6
     {
         AddressV6 result;
@@ -152,6 +197,13 @@ struct AddressV6 {
 };
 
 
+/**
+ * @brief Version-agnostic IP address holding either `AddressV4` or `AddressV6`.
+ *
+ * Use in generic APIs that must handle both address families. Concrete
+ * family can be queried with `is_v4()`/`is_v6()` and extracted with
+ * `to_v4()`/`to_v6()`.
+ */
 class Address {
 public:
     using address_type = std::variant<AddressV4, AddressV6>;
@@ -212,6 +264,14 @@ public:
         return std::get<AddressV6>(address_) <=> std::get<AddressV6>(other.address_);
     }
 
+    /**
+     * @brief Parse either a dotted-decimal or colon-hex address string.
+     *
+     * Tries IPv4 first, then IPv6. Throws if neither format matches.
+     *
+     * @param address String representation of the IP address.
+     * @throws std::system_error If neither format parses successfully.
+     */
     static auto from_string(std::string_view address) -> Address
     {
         AddressV4 ipv4{};
@@ -231,6 +291,7 @@ private:
 };
 
 
+/** @brief Stream output operator; delegates to `Address::to_string()`. */
 auto operator<<(std::ostream& os, const Address& address) -> std::ostream&
 {
     os << address.to_string();

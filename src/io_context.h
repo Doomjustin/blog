@@ -13,10 +13,22 @@
 #include "exceptions.h"
 #include "operation.h"
 
-// 只支持 core per thread 模型，所以io_context本身不需要考虑线程安全问题
-// 保持最新版本的实现
+/**
+ * @brief Event loop context backed by `io_uring`.
+ *
+ * This type owns one ring instance and drives completion delivery for
+ * coroutine operations. The design targets a core-per-thread model: loop
+ * execution and SQE provisioning are expected to happen on one thread,
+ * while `stop()` is safe to invoke from other threads.
+ */
 class IOContext {
 public:
+    /**
+     * @brief Initialize `io_uring` and install internal wakeup polling.
+     *
+     * @param entries SQ/CQ capacity hint passed to `io_uring_queue_init`.
+     * @throws std::system_error If ring or wakeup fd initialization fails.
+     */
     explicit IOContext(unsigned entries = 1024)
     {
         if (auto res = ::io_uring_queue_init(entries, &ring_, 0); res < 0)
@@ -32,16 +44,29 @@ public:
     IOContext(const IOContext&) = delete;
     auto operator=(const IOContext&) -> IOContext& = delete;
 
-    // 为了简化实现，我们不支持移动
+    // Move is intentionally disabled; IOContext owns kernel resources bound to one thread.
     IOContext(IOContext&& other) noexcept = delete;
     auto operator=(IOContext&&) -> IOContext& = delete;
 
+    /**
+     * @brief Release owned kernel resources.
+     *
+     * The destructor closes wakeup fd and exits the ring. It does not throw.
+     */
     ~IOContext()
     {
         ::io_uring_queue_exit(&ring_);
         ::close(wakeup_fd_);
     }
 
+    /**
+     * @brief Run the completion loop until stopped or no outstanding work.
+     *
+     * The loop submits pending SQEs, waits for at least one CQE, dispatches
+     * `Operation::complete`, and updates tracked work counters.
+     *
+     * @throws std::system_error On fatal `io_uring_submit_and_wait` failures.
+     */
     void run()
     {
         ::io_uring_cqe* cqe{ nullptr };
@@ -85,6 +110,16 @@ public:
         }
     }
 
+    /**
+     * @brief Acquire an SQE and mark one tracked work item.
+     *
+     * Use this when preparing an operation that will eventually produce a CQE
+     * and call `Operation::complete`.
+     *
+     * @return Available SQE from the owned ring.
+     * @throws std::system_error If no SQE can be obtained.
+     * @post Outstanding work count is incremented by one.
+     */
     [[nodiscard]]
     auto sqe() -> ::io_uring_sqe*
     {
@@ -96,27 +131,50 @@ public:
         return sqe;
     }
 
+    /**
+     * @brief Request loop termination and wake a blocked `run()`.
+     *
+     * This method is thread-safe and may be called from threads other than
+     * the loop owner.
+     */
     void stop()
     {
         should_stop_.store(true, std::memory_order_relaxed);
         wakeup();
     }
 
+    /**
+     * @brief Access the underlying mutable `io_uring` handle.
+     */
     auto ring() noexcept -> ::io_uring*
     {
         return &ring_;
     }
 
+    /**
+     * @brief Access the underlying const `io_uring` handle.
+     */
     auto ring() const noexcept -> const ::io_uring*
     {
         return &ring_;
     }
 
+    /**
+     * @brief Increment outstanding work counter.
+     *
+     * Used by spawned/background paths that keep the loop alive independently
+     * of immediate SQE submission.
+     */
     void add_work() noexcept
     {
         ++outstanding_works_;
     }
 
+    /**
+     * @brief Decrement outstanding work counter.
+     *
+     * @pre Outstanding work count must be greater than zero.
+     */
     void drop_work() noexcept
     {
         assert(outstanding_works_ > 0);
@@ -129,11 +187,17 @@ private:
     ::io_uring ring_{};
     int wakeup_fd_{ -1 };
 
-    // 只用来追踪io_context之外的操作，并不需要用户主动来使用相关的接口
+    // Tracks background work units that are not represented by immediate CQEs.
     std::size_t outstanding_works_{ 0 };
-    // stop会被跨线程调用，所以需要使用原子变量来保证线程安全
+    // `stop()` can be called cross-thread, so this flag is atomic.
     std::atomic<bool> should_stop_{ false };
 
+    /**
+     * @brief Submit a poll request that listens for wakeup fd readability.
+     *
+     * The resulting CQE is tagged with `WAKEUP_MARKER` and used only to break
+     * blocking wait cycles safely.
+     */
     void arm_wakeup()
     {
         auto* sqe = ::io_uring_get_sqe(&ring_);
@@ -144,12 +208,18 @@ private:
         ::io_uring_sqe_set_data64(sqe, WAKEUP_MARKER);
     }   
     
+    /**
+     * @brief Notify the loop via `eventfd` so `run()` can observe stop state.
+     */
     void wakeup()
     {
         std::uint64_t val = 1;
         ::write(wakeup_fd_, &val, sizeof(val));
     }
 
+    /**
+     * @brief Drain wakeup fd after receiving a wakeup CQE.
+     */
     void resume_wakeup()
     {
         uint64_t val;

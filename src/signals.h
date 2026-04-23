@@ -11,6 +11,12 @@
 #include "exceptions.h"
 #include "poll_awaiter.h"
 
+/**
+ * @brief Strong-typed wrapper around a POSIX signal number.
+ *
+ * Prevents signal numbers from being confused with plain integers at
+ * call sites, and makes signal-based APIs self-documenting.
+ */
 class Signal {
 public:
     explicit constexpr Signal(int signal)
@@ -29,6 +35,12 @@ private:
 };
 
 
+/**
+ * @brief Named constants for commonly used POSIX signals.
+ *
+ * Used with `SignalSet` to register signal interest without looking up
+ * signal numbers manually.
+ */
 struct signals {
     signals() = delete;
     
@@ -39,9 +51,26 @@ struct signals {
 };
 
 
+/**
+ * @brief Block a set of signals and expose them as async events via `signalfd`.
+ *
+ * Signals added to the set are masked from normal delivery using
+ * `pthread_sigmask`. Instead, callers `co_await async_wait()` to receive
+ * them through the event loop, which avoids signal-handler race conditions.
+ *
+ * @tparam Context Execution context type (must provide `sqe()`).
+ */
 template<typename Context>
 class SignalSet {
 public:
+    /**
+     * @brief Mask the specified signals and create the underlying `signalfd`.
+     *
+     * @tparam Signals Pack of `Signal` values.
+     * @param io_context I/O context used to drive `async_wait`.
+     * @param sigal      One or more signals to block and monitor.
+     * @throws std::system_error If `pthread_sigmask` or `signalfd` fails.
+     */
     template<typename... Signals>
         requires (std::same_as<Signals, Signal> && ...)
     SignalSet(Context& io_context, Signals... sigal)
@@ -75,6 +104,14 @@ public:
             ::close(fd_);
     }
 
+    /**
+     * @brief Suspend until at least one registered signal is delivered.
+     *
+     * Callers should drain the `signalfd` after resuming to consume the
+     * pending `signalfd_siginfo` record.
+     *
+     * @return Awaiter that completes when the fd is readable.
+     */
     auto async_wait() noexcept -> PollAwaiter<Context>
     {
         return PollAwaiter<Context>{ io_context_, fd_, POLLIN };

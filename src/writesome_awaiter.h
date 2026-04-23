@@ -12,11 +12,27 @@
 #include "exceptions.h"
 #include "operation.h"
 
+/**
+ * @brief Suspend until a single `send` completes via io_uring.
+ *
+ * Submits one `io_uring_prep_send` SQE and resumes the coroutine with the
+ * number of bytes sent, or an error code on failure.
+ *
+ * @tparam Context Execution context type (must provide `sqe()`).
+ */
 template<typename Context>
 class WriteSomeAwaiter: public Operation {
 public:
     using resume_type = std::size_t;
 
+    /**
+     * @brief Construct with target fd and source buffer.
+     *
+     * @param context I/O context that drives this operation.
+     * @param fd      Destination socket file descriptor.
+     * @param buffer  Read-only byte span of data to send.
+     * @pre `buffer` must remain valid until the coroutine is resumed.
+     */
     WriteSomeAwaiter(Context& context, int fd, std::span<const std::byte> buffer)
       : context_{ context }, fd_{ fd }, buffer_{ buffer }
     {}

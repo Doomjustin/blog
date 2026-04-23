@@ -15,6 +15,13 @@
 #include "exceptions.h"
 #include "operation.h"
 
+/**
+ * @brief Constrain inner operations that can be wrapped with timeout semantics.
+ *
+ * The operation must expose a `context()`, `prepare()`, `set_result()`, and
+ * `await_resume()` interface and derive from `Operation` so `TimeoutAwaiter`
+ * can set it as CQE user-data and dispatch completions correctly.
+ */
 template<typename T>
 concept single_shot_only_operation = requires (T& op, ::io_uring_sqe* sqe, std::coroutine_handle<> handle)
 {
@@ -28,11 +35,28 @@ concept single_shot_only_operation = requires (T& op, ::io_uring_sqe* sqe, std::
 } && std::derived_from<T, Operation>;
 
 
+/**
+ * @brief Wrap an inner io_uring operation with a linked timeout SQE.
+ *
+ * Uses `IOSQE_IO_LINK` to chain the inner operation SQE with a
+ * `io_uring_prep_link_timeout` SQE. The coroutine is resumed only after
+ * both CQEs arrive so neither result is lost. If the timeout fires first,
+ * `await_resume` returns `std::errc::timed_out`.
+ *
+ * @tparam InnerOperation Operation type satisfying `single_shot_only_operation`.
+ */
 template<single_shot_only_operation InnerOperation>
 class TimeoutAwaiter: public Operation {
 public:
     using resume_type = typename InnerOperation::resume_type;
 
+    /**
+     * @brief Construct from an inner operation and a timeout duration.
+     *
+     * @tparam Duration `std::chrono::duration` specialization.
+     * @param operation Inner operation to wrap; moved into this awaiter.
+     * @param timeout   Maximum allowed duration for the inner operation.
+     */
     template<chrono_duration Duration>
     TimeoutAwaiter(InnerOperation&& operation, Duration timeout)
       : inner_operation_{ std::forward<InnerOperation>(operation) }
@@ -101,8 +125,9 @@ private:
     __kernel_timespec timeout_;
 
     std::coroutine_handle<> handle_;
-    // 必须保证2个CQE都完成了才resume协程，因为可能存在一种情况：
-    // timeout先完成了，此时需要等到io操作完成后才能resume协程，否则就会丢失io操作的结果
+    // Both CQEs (inner op + timeout) must complete before resuming the coroutine.
+    // If the timeout CQE arrives first, we still wait for the inner op CQE to
+    // avoid losing its result.
     int pending_cqes_{ 2 };
     bool is_timed_out_{ false };
     int result_{ -ECANCELED };

@@ -23,11 +23,6 @@ IncludeCategories:
     Priority: 4
     CaseSensitive: false
   
-  # 项目内头文件
-  - Regex: '^<(sponge)'
-    Priority: 5
-    CaseSensitive: false
-
   # 相对路径引入 最高优先级
   - Regex: '^".*"'
     Priority: 6

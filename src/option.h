@@ -3,6 +3,14 @@
 
 #include <concepts>
 
+/**
+ * @brief Constrain socket option types used with `setsockopt`/`getsockopt`.
+ *
+ * An option must advertise its `level` and `name` constants and provide a
+ * `data()`/`size()` pair compatible with the POSIX socket option API.
+ * It must also be default-constructible so the get-option path can create
+ * an empty value to be filled in by the kernel.
+ */
 template<typename T>
 concept socket_option = requires(const T& opt) {
     { T::level } -> std::convertible_to<int>;
@@ -12,6 +20,13 @@ concept socket_option = requires(const T& opt) {
 } && std::is_default_constructible_v<T>;
 
 
+/**
+ * @brief Constrain flag options toggled via `fcntl(F_GETFL/F_SETFL)` or similar.
+ *
+ * Flag options (e.g. `O_NONBLOCK`, `FD_CLOEXEC`) differ from socket options:
+ * they are set by ORing a single bit into a flags word rather than via
+ * `setsockopt`, so they need different command constants.
+ */
 template<typename T>
 concept flag_option = requires(const T& opt) {
     { T::get_cmd } -> std::convertible_to<int>;
@@ -21,6 +36,15 @@ concept flag_option = requires(const T& opt) {
   && std::convertible_to<T, bool>;
 
 
+/**
+ * @brief Model a boolean-valued socket option backed by an `int` flag.
+ *
+ * Encodes the `SO_KEEPALIVE`, `SO_REUSEADDR` family of options where the
+ * kernel expects a non-zero `int` to mean *enabled*.
+ *
+ * @tparam Level `setsockopt` level (e.g. `SOL_SOCKET`, `IPPROTO_TCP`).
+ * @tparam Name  `setsockopt` option name.
+ */
 template<int Level, int Name>
 class BooleanOption {
 public:
@@ -67,6 +91,16 @@ private:
 };
 
 
+/**
+ * @brief Model an integer-valued socket option.
+ *
+ * Covers options such as `SO_RCVBUF`, `TCP_KEEPIDLE`, `TCP_KEEPINTVL`
+ * where the kernel reads or writes a numeric value of type `T`.
+ *
+ * @tparam Level `setsockopt` level.
+ * @tparam Name  `setsockopt` option name.
+ * @tparam T     Integer value type (default `int`).
+ */
 template<int Level, int Name, std::integral T = int>
 class ValueOption {
 public:
@@ -113,6 +147,17 @@ private:
 };
 
 
+/**
+ * @brief Model a single-bit flag toggled via `fcntl`.
+ *
+ * Used for file-descriptor flags such as `O_NONBLOCK` and `FD_CLOEXEC`
+ * where the setting involves reading the current flags word, masking or
+ * setting the target bit, and writing back.
+ *
+ * @tparam GetCmd `fcntl` command to read current flags (e.g. `F_GETFL`).
+ * @tparam SetCMD `fcntl` command to write new flags (e.g. `F_SETFL`).
+ * @tparam Bit    Target flag bit (e.g. `O_NONBLOCK`).
+ */
 template<int GetCmd, int SetCMD, int Bit>
 class FlagOption {
 public:

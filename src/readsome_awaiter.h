@@ -13,11 +13,28 @@
 #include "exceptions.h"
 #include "operation.h"
 
+/**
+ * @brief Suspend until a single `recv` completes via io_uring.
+ *
+ * Submits one `io_uring_prep_recv` SQE and resumes the coroutine with the
+ * number of bytes read, or an error code if the operation fails.
+ * A result of 0 indicates the peer closed the connection.
+ *
+ * @tparam Context Execution context type (must provide `sqe()`).
+ */
 template<typename Context>
 class ReadSomeAwaiter: public Operation {
 public:
     using resume_type = std::size_t;
 
+    /**
+     * @brief Construct with target fd and destination buffer.
+     *
+     * @param context I/O context that drives this operation.
+     * @param fd      Source socket file descriptor.
+     * @param buffer  Writable byte span that receives data.
+     * @pre `buffer` must remain valid until the coroutine is resumed.
+     */
     ReadSomeAwaiter(Context& context, int fd, std::span<std::byte> buffer)
       : context_{ context }, fd_{ fd }, buffer_{ buffer }
     {}

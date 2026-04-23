@@ -9,11 +9,27 @@
 #include "exceptions.h"
 #include "operation.h"
 
+/**
+ * @brief Suspend until a file descriptor becomes ready for the requested events.
+ *
+ * Submits an `io_uring_prep_poll_add` SQE and resumes the calling coroutine
+ * when the CQE arrives. Useful for waiting on file descriptors that do not
+ * have a dedicated io_uring opcode (e.g. `signalfd`, `eventfd`).
+ *
+ * @tparam Context Execution context type (must provide `sqe()`).
+ */
 template<typename Context>
 class PollAwaiter: public Operation {
 public:
     using resume_type = void;
 
+    /**
+     * @brief Construct with the fd and event mask to poll.
+     *
+     * @param context I/O context that drives this operation.
+     * @param fd      File descriptor to watch.
+     * @param events  `POLLIN`/`POLLOUT`/... mask forwarded to `io_uring_prep_poll_add`.
+     */
     PollAwaiter(Context& context, int fd, short events)
       : context_{ context }, 
         fd_{ fd }, 

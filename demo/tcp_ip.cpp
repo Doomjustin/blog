@@ -1,20 +1,36 @@
-#include "ip/tcp.h"
-
 #include <cstdlib>
 #include <iostream>
 
 #include <spdlog/spdlog.h>
 
+#include "buffer.h"
 #include "co_spawn.h"
 #include "io_context.h"
+#include "ip/tcp.h"
+#include "signals.h"
 #include "task.h"
+#include "timeout.h"
+
+auto shutdown_monitor(IOContext& context) -> Task<void>
+{
+    using namespace std::chrono_literals;
+
+    SignalSet sets{ context, signals::interrupt, signals::terminate };
+
+    co_await sets.async_wait();
+
+    spdlog::info("Received shutdown signal, stopping IOContext...");
+    context.stop();
+}
 
 auto session(ip::tcp::socket<IOContext> client) -> Task<>
 {
-    auto buffer = std::array<std::byte, 1024>{};
+    auto data = std::string(1024, '\0');
 
     while (true) {
-        auto read_result = co_await client.async_read_some(buffer);
+        // 1. 异步读取，协程挂起，零线程阻塞
+        // 如果需要的话，你也可以套一个timeout。不过不要忘了除了timedout错误
+        auto read_result = co_await client.async_read_some(buffer(data));
         if (!read_result) {
             spdlog::warn("Failed to read from client {}: {}", client.native_handle(), read_result.error().message());
             co_return;
@@ -26,14 +42,19 @@ auto session(ip::tcp::socket<IOContext> client) -> Task<>
             co_return;
         }
 
-        spdlog::info("Read {} bytes from client {}", bytes_read, client.native_handle());
-        std::string data{ reinterpret_cast<const char*>(buffer.data()), bytes_read };
         spdlog::warn("Data from client {}: {}", client.native_handle(), data);
 
-        auto write_buffer = std::span{ buffer }.first(bytes_read);
-        auto write_result = co_await client.async_write_some(write_buffer);
+        auto write_buffer = buffer(data.substr(0, bytes_read));
+
+        // 2. 利用 std::span 提取有效数据视图，异步写回
+        using namespace std::literals::chrono_literals;
+        auto write_result = co_await timeout(client.async_write_some(write_buffer), 5s);
         if (!write_result) {
-            spdlog::warn("Failed to write to client {}: {}", client.native_handle(), write_result.error().message());
+            if (write_result.error() == std::errc::timed_out)
+                spdlog::warn("Write to client {} timed out", client.native_handle());
+            else
+                spdlog::warn("Failed to write to client {}: {}", client.native_handle(), write_result.error().message());
+
             co_return;
         }
     }
@@ -63,6 +84,7 @@ int main(int argc, char* argv[])
     IOContext context;
 
     co_spawn(context, echo(context));
+    co_spawn(context, shutdown_monitor(context));
 
     context.run();
 

@@ -10,6 +10,16 @@
 #include "exceptions.h"
 #include "operation.h"
 
+/**
+ * @brief Suspend until an incoming connection is accepted via io_uring.
+ *
+ * Submits one `io_uring_prep_accept` SQE and resumes the coroutine with
+ * a fully constructed socket object wrapping the accepted fd, or an error
+ * code on failure.
+ *
+ * @tparam Protocol Protocol type defining `socket` and `endpoint` associated types.
+ * @tparam Context  Execution context type (must provide `sqe()`).
+ */
 template<typename Protocol, typename Context>
 class AcceptAwaiter: public Operation {
 public:
@@ -18,6 +28,15 @@ public:
     using context_type = Context;
     using resume_type = socket_type;
 
+    /**
+     * @brief Construct for accept without peer capture.
+     *
+     * @param context I/O context that drives this operation.
+     * @param fd      Listening socket file descriptor.
+     * @param peer    Optional endpoint buffer to capture the peer address.
+     *                Pass `nullptr` to discard peer information.
+     * @pre If non-null, `*peer` must remain valid until the coroutine is resumed.
+     */
     AcceptAwaiter(context_type& context, int fd, endpoint_type* peer = nullptr)
       : context_{ context }, fd_{ fd }, peer_{ peer }
     {
@@ -71,6 +90,9 @@ public:
     {
         set_result(result, flags);
 
+        if (peer_ && result >= 0)
+            peer_->resize(addrlen_);
+
         if (handle_) {
             auto handle = std::exchange(handle_, nullptr);
             handle.resume();
@@ -83,7 +105,7 @@ private:
     context_type& context_;
     int fd_;
     endpoint_type* peer_;
-    socklen_t addrlen_;
+    socklen_t addrlen_{};
 
     std::coroutine_handle<> handle_{ nullptr };
     int result_fd_{ -1 };

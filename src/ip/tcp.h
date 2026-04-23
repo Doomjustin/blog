@@ -9,6 +9,14 @@
 
 namespace ip {
 
+/**
+ * @brief Protocol tag that identifies TCP stream sockets.
+ *
+ * Acts as a policy type: it carries address family (`AF_INET` or
+ * `AF_INET6`), socket type (`SOCK_STREAM`), and protocol (`IPPROTO_TCP`)
+ * metadata, and defines the associated `endpoint`, `socket`, and
+ * `acceptor` type aliases used throughout the library.
+ */
 class tcp {
 public:
     using address = Address;
@@ -41,11 +49,13 @@ public:
         return IPPROTO_TCP;
     }
 
+    /** @brief Return a TCP/IPv4 protocol instance. */
     static auto v4() noexcept -> tcp
     {
         return tcp{ AF_INET };
     }
 
+    /** @brief Return a TCP/IPv6 protocol instance. */
     static auto v6() noexcept -> tcp
     {
         return tcp{ AF_INET6 };
