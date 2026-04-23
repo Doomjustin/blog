@@ -61,6 +61,20 @@ BasicAcceptor(Context& context, const endpoint_type& endpoint, bool enable_reuse
 ```
 对于需要横向扩展的多 Worker 进程架构，我们还提供了一个额外的配置项，允许显式开启 `SO_REUSEPORT`，将底层的连接负载均衡交由 Linux 内核的 TCP/IP 协议栈处理。
 
+除此之外，用户也可以通过延迟打开的方式，自己配置相对应的option
+~~~c++
+auto acceptor = ip::tcp::accptor{ io_contex };
+// 手动打开socket
+acceptor.open(ep.protocol());
+
+// 配置需要的option
+acceptor.option(reuse_address{ true });
+
+// 注意bind的先后顺序
+acceptor.bind(ep);
+acceptor.listen();
+~~~
+
 ### 4. 异步抽象：获取对端元数据
 
 在很多业务场景（如访问控制、日志审计）中，服务端需要知道新连接的源 IP 和端口。此时，我们需要提供一个接收 `endpoint_type` 引用的 `async_accept` 重载版本。
@@ -129,9 +143,9 @@ auto async_accept(endpoint_type& endpoint) noexcept -> AcceptAwaiter<Protocol, C
 }
 ```
 
-[完整代码](../src/acceptor.h)
+[完整代码](https://github.com/Doomjustin/blog/blob/main/src/acceptor.h)
 
-### 5. 终局之战：全异步 Echo Server 实战
+### 5. 全异步 Echo Server 实战
 
 基础设施拼图现已全部齐备（`IOContext`、`Endpoint`、`StreamSocket`、`Acceptor`、协程调度机制）。是时候用几行极其简练的 C++20 代码，检验这套系统的真实战力了。
 
@@ -195,25 +209,21 @@ auto session(ip::tcp::socket<IOContext> client) -> Task<>
 ```cpp
 auto echo(IOContext& context) -> Task<>
 {
-    // 绑定本地 IPv6 环回地址 (双栈系统通常兼容 IPv4)
+    // auto endpoint = ip::tcp::endpoint::from_string("127.0.0.1", 12345);
     auto endpoint = ip::tcp::endpoint{ ip::AddressV6::loopback(), 12345 };
-    // 或者你喜欢从string构造也可以
-    // auto endpoint = ip::tcp::endpoint::from_string("::1", 12345);
-
     std::cout << "Server listening on " << endpoint << "\n";
 
-    // 构造即监听，自动处理资源绑定与 SO_REUSEADDR
     auto acceptor = ip::tcp::acceptor{ context, endpoint };
 
+    auto client_endpoint = ip::tcp::endpoint{};
     while (true) {
-        // 异步等待新连接
-        auto client = co_await acceptor.async_accept();
+        auto client = co_await acceptor.async_accept(client_endpoint);
         if (!client) {
-            spdlog::warn("Accept failed: {}", client.error().message());
-            continue; // 局部错误不中断服务
+            spdlog::warn("Failed to accept client connection: {}", client.error().message());
+            continue;
         }
 
-        // 所有权转移 (std::move)，派生子协程独立处理会话
+        spdlog::info("Accepted connection from {}:{}", client_endpoint.address().to_string(), client_endpoint.port());
         co_spawn(context, session(std::move(*client)));
     }
 }
@@ -232,28 +242,24 @@ int main(int argc, char* argv[])
 }
 ```
 
-[完整代码](../demo/tcp_ip.cpp)
+[完整代码](https://github.com/Doomjustin/blog/blob/main/demo/tcp_ip.cpp)
 
 运行结果
 ~~~bash
-blog.tcp_ip
-Server listening on ::1:12345
-[2026-04-23 15:30:10.760] [warning] Data from client 7: dasfsadascdsaa
+[2026-04-23 15:49:48.030] [info] Accepted connection from ::1:37696
+[2026-04-23 15:49:49.471] [warning] Data from client 7: dsaf
 
-[2026-04-23 15:30:12.908] [warning] Data from client 7: dasdsacadvdqassafsqaasd
+[2026-04-23 15:49:51.885] [warning] Data from client 7: dasaasdd
 
-[2026-04-23 15:30:18.113] [warning] Data from client 8: dcx
-[2026-04-23 15:30:21.882] [warning] Data from client 8: das阿斯顿
+[2026-04-23 15:49:54.124] [info] Accepted connection from ::1:48684
+[2026-04-23 15:49:55.462] [warning] Data from client 8: fasasdasdfas
 
-[2026-04-23 15:30:24.878] [info] Client 8 disconnected
-[2026-04-23 15:30:26.492] [info] Client 7 disconnected
-^C[2026-04-23 15:30:28.886] [info] Received shutdown signal, stopping IOContext...
+[2026-04-23 15:49:55.987] [info] Client 8 disconnected
+[2026-04-23 15:49:57.515] [info] Client 7 disconnected
+^C[2026-04-23 15:49:59.360] [info] Received shutdown signal, stopping IOContext...
 ~~~
 
 ### 结语
-
-回顾这段 Echo Server 的代码，你不会看到任何底层的 `epoll_ctl`，不会看到回调函数（Callback），甚至看不到任何 `try-catch` 块。
-
 我们利用 C++20 的协程机制彻底抹平了异步 I/O 的认知鸿沟；利用 `io_uring` 将系统调用的开销降至极限；更重要的是，利用现代 C++ 的类型萃取与所有权语义（RAII & Move Semantics），我们将资源泄漏、类型混用等致命的系统级并发问题，统统拦截在了编译期。
 
-至此，我们的网络库基础设施已经稳固。接下来，我们将基于这套底层设施，向更高层的应用协议（如 HTTP 路由中间件）发起挑战。
+别的类型的socket我们不做介绍，和stream socket大体上都是相同的。后续会回归主线，介绍writev以及uring buffer环形队列的协程接口封装。

@@ -68,13 +68,15 @@ auto echo(IOContext& context) -> Task<>
 
     auto acceptor = ip::tcp::acceptor{ context, endpoint };
 
+    auto client_endpoint = ip::tcp::endpoint{};
     while (true) {
-        auto client = co_await acceptor.async_accept();
+        auto client = co_await acceptor.async_accept(client_endpoint);
         if (!client) {
             spdlog::warn("Failed to accept client connection: {}", client.error().message());
             continue;
         }
 
+        spdlog::info("Accepted connection from {}:{}", client_endpoint.address().to_string(), client_endpoint.port());
         co_spawn(context, session(std::move(*client)));
     }
 }
