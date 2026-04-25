@@ -10,6 +10,7 @@
 #include "signals.h"
 #include "task.h"
 #include "timeout.h"
+#include "write.h"
 
 auto shutdown_monitor(IOContext& context) -> Task<void>
 {
@@ -48,7 +49,7 @@ auto session(ip::tcp::socket<IOContext> client) -> Task<>
 
         // 2. 利用 std::span 提取有效数据视图，异步写回
         using namespace std::literals::chrono_literals;
-        auto write_result = co_await timeout(client.async_write_some(write_buffer), 5s);
+        auto write_result = co_await timeout(write(client, write_buffer), 1ms);
         if (!write_result) {
             if (write_result.error() == std::errc::timed_out)
                 spdlog::warn("Write to client {} timed out", client.native_handle());

@@ -14,13 +14,6 @@
 
 #include "exceptions.h"
 
-namespace operations {
-
-/**
- * @brief Sentinel value returned by POSIX APIs on failure.
- */
-inline constexpr int INVALID_RESULT = -1;
-
 /**
  * @brief Constrain endpoint types that can receive address data from kernel.
  *
@@ -72,6 +65,13 @@ concept const_buffer = requires(const T& t)
 template <typename T>
 concept sequence_buffer = std::ranges::range<T> && const_buffer<std::ranges::range_reference_t<T>>;
 
+
+namespace operations {
+
+/**
+ * @brief Sentinel value returned by POSIX APIs on failure.
+ */
+inline constexpr int INVALID_RESULT = -1;
 
 /**
  * @brief Shutdown directions forwarded to `shutdown(2)`.

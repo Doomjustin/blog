@@ -20,4 +20,8 @@
   },
   "python-envs.defaultEnvManager": "ms-python.python:system",
   "C_Cpp.intelliSenseEngine": "disabled",
+  "cmake.debugConfig": {
+    "type": "lldb-dap",
+    "miDebuggerPath": "/home/doom/llvm-project/build/bin/lldb-dap"
+  }
 }

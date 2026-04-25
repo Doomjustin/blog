@@ -26,9 +26,16 @@
  * @endcode
  */
 template<single_shot_only_operation Operation, chrono_duration Duration>
-auto timeout(Operation&& awaitable, Duration timeout) -> TimeoutAwaiter<std::decay_t<Operation>>
+    requires (!cancelable_operation<Operation>)
+auto timeout(Operation&& operation, Duration timeout) -> TimeoutAwaiter<std::decay_t<Operation>>
 {
-    return TimeoutAwaiter<std::decay_t<Operation>>{ std::forward<Operation>(awaitable), timeout };
+    return TimeoutAwaiter<std::decay_t<Operation>>{ std::forward<Operation>(operation), timeout };
+}
+
+template<cancelable_operation Operation, chrono_duration Duration>
+auto timeout(Operation&& operation, Duration timeout) -> TimeoutCombinator<std::decay_t<Operation>>
+{
+    return TimeoutCombinator<std::decay_t<Operation>>{ std::forward<Operation>(operation), timeout };
 }
 
 #endif // BLOG_TIMEOUT_H

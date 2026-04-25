@@ -121,13 +121,15 @@ public:
      * @post Outstanding work count is incremented by one.
      */
     [[nodiscard]]
-    auto sqe() -> ::io_uring_sqe*
+    auto sqe(bool tracking = true) -> ::io_uring_sqe*
     {
         auto* sqe = ::io_uring_get_sqe(&ring_);
         if (!sqe)
             throw_system_error("io_uring_get_sqe");
 
-        add_work();
+        if (tracking)
+            add_work();
+        
         return sqe;
     }
 

@@ -67,6 +67,8 @@ public:
         timeout_.tv_nsec = duration_cast<nanoseconds>(timeout % 1s).count();
     }
 
+    ~TimeoutAwaiter() = default;
+
     [[nodiscard]]
     constexpr auto await_ready() const noexcept
     {
@@ -131,6 +133,132 @@ private:
     int pending_cqes_{ 2 };
     bool is_timed_out_{ false };
     int result_{ -ECANCELED };
+};
+
+
+template<typename T>
+concept cancelable_operation = requires(T& t)
+{
+    typename T::resume_type;
+
+    requires std::is_lvalue_reference_v<decltype(t.context())>;
+    t.await_suspend(std::coroutine_handle<>());
+} && std::derived_from<T, CancelableOperation>;
+
+
+template<cancelable_operation Awaiter>
+class TimeoutCombinator: public CancelableOperation {
+public:
+    using resume_type = typename Awaiter::resume_type;
+
+    template<chrono_duration Duration>
+    TimeoutCombinator(Awaiter&& awaiter, Duration timeout)
+      : awaiter_{ std::forward<Awaiter>(awaiter) }
+    {
+        using namespace std::chrono;
+
+        timeout_.tv_sec = duration_cast<seconds>(timeout).count();
+        timeout_.tv_nsec = duration_cast<nanoseconds>(timeout % 1s).count();
+
+        awaiter_.parent = this;
+    }
+
+    ~TimeoutCombinator() = default;
+
+    [[nodiscard]]
+    constexpr auto await_ready() const noexcept -> bool
+    {
+        return false;
+    }
+
+    void await_suspend(std::coroutine_handle<> handle) noexcept
+    {
+        handle_ = handle;
+
+        auto* sqe = context().sqe();
+        ::io_uring_prep_timeout(sqe, &timeout_, 0, 0);
+        ::io_uring_sqe_set_data(sqe, &timer_);
+
+        awaiter_.await_suspend(handle);
+    }
+
+    auto await_resume() -> std::expected<resume_type, std::error_code>
+    {
+        if (state_ == State::TimerCompleted)
+            return unexpected_system_error(std::errc::timed_out);
+
+        return awaiter_.await_resume();
+    }
+
+    void complete(int result, std::uint32_t flags) noexcept override
+    {
+        // 如果内层操作先完成了，取消定时器SQE以避免不必要的超时事件
+        if (state_ == State::Pending) {
+            state_ = State::AwaiterCompleted;
+
+            auto* sqe = context().sqe(false);
+            ::io_uring_prep_cancel(sqe, &timer_, 0);
+            ::io_uring_sqe_set_data(sqe, nullptr);
+        }
+
+        // 等到两个CQE都完成后才返回结果，避免丢失任何一个的完成事件
+        if (--pending_cqes_ == 0) {
+            auto handle = std::exchange(handle_, {});
+            handle.resume();
+        }
+    }
+
+    auto context() noexcept -> decltype(std::declval<Awaiter&>().context())
+    {
+        return awaiter_.context();
+    }
+
+private:
+    enum State: std::uint8_t {
+        Pending,
+        AwaiterCompleted,
+        TimerCompleted
+    };
+
+    struct Timer: public Operation {
+        TimeoutCombinator* owner;
+
+        Timer(TimeoutCombinator* owner) 
+          : owner{ owner } 
+        {}
+
+        ~Timer() = default;
+
+        void complete(int result, [[maybe_unused]] std::uint32_t flags) noexcept override
+        {
+            owner->on_timer_completed(result);
+        }
+    };
+
+    Awaiter awaiter_;
+    struct __kernel_timespec timeout_;
+
+    std::coroutine_handle<> handle_;
+    State state_{ State::Pending };
+    int pending_cqes_{ 2 };
+    Timer timer_{ this };
+
+    void on_timer_completed(int result) noexcept
+    {
+        // 如果定时器先完成了，取消内层操作以避免不必要的处理
+        if (state_ == State::Pending) {
+            state_ = State::TimerCompleted;
+
+            auto* sqe = context().sqe(false);
+            ::io_uring_prep_cancel(sqe, &awaiter_, 0);
+            ::io_uring_sqe_set_data(sqe, nullptr);
+        }
+
+        if (--pending_cqes_ == 0) {
+            auto handle = std::exchange(handle_, {});
+            handle.resume();
+        }
+    }
 };
 
 #endif // BLOG_TIMEOUT_AWAITER_H

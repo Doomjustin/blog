@@ -8,6 +8,7 @@
 #include "operations.h"
 #include "readsome_awaiter.h"
 #include "socket.h"
+#include "write_sequence_awaiter.h"
 #include "writesome_awaiter.h"
 
 namespace ip {
@@ -139,6 +140,24 @@ public:
         -> WriteSomeAwaiter<Context>
     {
         return WriteSomeAwaiter<Context>{ this->context(), this->native_handle(), buffer };
+    }
+
+    /**
+     * @brief Suspend until a gather-write completes via io_uring.
+     *
+     * Submits a vectored send operation backed by a sequence of immutable
+     * buffers and resumes when the kernel reports completion.
+     *
+     * @tparam Buffer Buffer sequence type satisfying `sequence_buffer`.
+     * @param buffer Sequence of source buffers written in order.
+     * @pre All underlying buffer storage must outlive the `co_await` expression.
+     * @return Bytes written or an error code.
+     */
+    template<sequence_buffer Buffer>
+    auto async_write_some(const Buffer& buffer) noexcept
+        -> WriteSequenceAwaiter<Context, Buffer>
+    {
+        return WriteSequenceAwaiter<Context, Buffer>{ this->context(), this->native_handle(), buffer };
     }
 };
 
