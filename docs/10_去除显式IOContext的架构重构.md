@@ -4,15 +4,19 @@
 
 `IOContext` 在框架内部当然是核心，事件循环、SQE/CQE 调度、work 计数都离不开它。真正让人犹豫的是另一件事: 用户代码里要不要处处显式传 `IOContext&`。
 
-一开始看，显式传参很“透明”，但写着写着就会发现它并没有给业务层带来真正自由。因为当前这套并发模型其实是固定的: 每个线程一个 context，每个线程跑自己的 `run()`，外层由 `async::run(thread_count, ...)` 统一拉起。既然范式固定，继续把 context 暴露成日常 API，用户就很容易产生错觉，以为自己在做线程编排，实际上只是重复框架已经确定好的路径。
+一开始看，显式传参很"透明"，但写着写着就会发现它并没有给业务层带来真正自由。我们想支持的并发模型其实从一开始就是确定的：每个线程一个 context，每个线程各自跑事件循环，线程数量由启动参数决定。既然目标范式是固定的，继续把 context 暴露成日常 API，用户就很容易产生错觉，以为自己在做线程编排，实际上只是重复一个框架本可以帮他完成的路径。
 
 Asio 和 io_uring-cpp 之类的库之所以把 `io_context` / `io_uring_context` 作为显式参数暴露出来，是因为它们需要支持更复杂的并发拓扑——同一进程里可以有多个独立的 context，同一个 socket 可以在不同 context 之间迁移，线程与 context 的对应关系可以由用户自由配置。为了支持这种自由度，context 就必须出现在每一个需要它的地方：socket 构造时要绑定 context，每次异步操作要知道往哪个 context 提交 SQE。这个代价不是设计失误，而是为了满足通用性的合理取舍。
 
 我们的情况不同。这个库从一开始就只打算支持一种并发模型：每线程一个 context，所有线程跑同样的协程入口，由 `async::run` 统一管理。这个约束是主动选择的，不是偷懒，而是认为对于绝大多数网络服务场景，这个模型就已经够用，而且更难被误用。正因为并发模型是确定的，context 就可以从参数里消失，退回到线程局部存储里待命。
 
+这个选择当然有代价。隐藏 context 之后，用户也就失去了"把这个连接交给某个特定线程处理"的能力。当前的连接分发完全依赖内核的 `SO_REUSEPORT`——多个线程各自 accept，内核负责把新连接均匀分配过去。如果业务需要最少连接数、一致性哈希这类应用层调度策略，默认路径就不够用了。
+
+但这不是无路可走。需要自定义负载均衡的用户，可以绕过 `async::run` 的封装，直接操作 `IOContext`——手动创建线程、绑定 context、管理连接归属。这条路更复杂，要求用户真正理解 context 的生命周期和调度语义，但接口是开放的。默认隐藏 context，不是在堵死这条路，而是认为大多数场景不需要走它。
+
 所以这轮重构想解决的，是让用户不再需要关心 `IOContext`。框架内部继续依赖它，只是不再要求用户把它带进日常代码里。
 
-入口上，这个意图非常直接。`run(thread_count, ...)` 已经把线程模型封装好了: 子线程启动后拿到当前线程的 `this_coroutine::context()`，`co_spawn` 任务，进入事件循环；主线程走同样流程。业务侧不需要再去维护“线程和 context 的绑定表”，只需要表达“跑几个 worker，执行哪个协程入口”。
+入口上，这个意图非常直接。`async::run` 的实现把范式固定得很彻底：
 ```cpp
 template<typename Awaiter, typename... Args>
 void run(std::integral auto thread_count, Awaiter&& awaiter, Args&&... args)
@@ -32,7 +36,7 @@ void run(std::integral auto thread_count, Awaiter&& awaiter, Args&&... args)
 }
 ```
 
-用户传入的是一个协程函数和它的参数，`run` 内部完成线程创建、context 绑定、事件循环启动、退出后 context 注销这整条链路。这个范式本身就已经固定了：不同线程之间没有共享 context，也不需要用户来决定线程与 context 的对应关系。
+用户传入的是一个协程函数和它的参数，`run` 内部完成线程创建、context 绑定、事件循环启动、退出后 context 注销这整条链路。不同线程之间没有共享 context，也不需要用户来决定线程与 context 的对应关系——这条路只有一种走法。
 这个模式能成立，依赖的是线程局部 context:
 
 ```cpp
@@ -108,6 +112,27 @@ auto session(net::ip::tcp::socket client) -> async::Task<>
 
 这是用户不再需要关心 `IOContext` 之后真正的书写状态：从 accept 到 session、从读取到超时写回，context 在这条路上完全透明。
 
+实际跑起来，20 个 worker 线程同时监听，各自持有独立的 context，accept 和 session 由内核按连接分配到不同线程处理：
+
+```
+[2026-04-30 15:59:49.301] [9833] [info] Server listening on ::1:12345
+[2026-04-30 15:59:49.301] [9832] [info] Server listening on ::1:12345
+[2026-04-30 15:59:49.302] [9835] [info] Server listening on ::1:12345
+[2026-04-30 15:59:49.301] [9834] [info] Server listening on ::1:12345
+...
+[2026-04-30 15:59:49.306] [9850] [info] Server listening on ::1:12345
+[2026-04-30 15:59:57.419] [9838] [info] Accepted connection from ::1:52762
+[2026-04-30 15:59:58.467] [9838] [info] Received 8 bytes from client 64
+[2026-04-30 15:59:58.467] [9838] [info] Data: dasfasf
+[2026-04-30 15:59:58.980] [9838] [info] Client 64 disconnected
+[2026-04-30 15:59:59.950] [9849] [info] Accepted connection from ::1:52770
+[2026-04-30 16:00:00.568] [9849] [info] Client 64 disconnected
+[2026-04-30 16:00:01.591] [9841] [info] Accepted connection from ::1:52786
+[2026-04-30 16:00:02.043] [9841] [info] Client 64 disconnected
+```
+
+日志里每行的线程 ID 不同，但业务代码里根本没有出现过"把这个 session 分配给哪个线程"的逻辑——这正是 `SO_REUSEPORT` 加上每线程独立 context 共同决定的结果，不是用户在代码里手工安排的。
+
 `DetachedTask::promise_type` 仍然在内部绑定 context，并在生命周期里维护 work 计数：
 
 ```cpp
@@ -142,4 +167,4 @@ void stop()
 
 正在阻塞在 `submit_and_wait` 的事件循环会被唤醒，检查 `should_stop_` 后走退出路径；任务侧依赖 work 计数和协程收尾自然回落。`shutdown_monitor()` 只需要等信号、调一次 `async::stop()`，其余全部由框架收尾。这样 stop/cancel 不再是额外补丁，而是和调度模型放在同一条主线上。
 
-至此，我们达成了重构的目标，向用户代码隐藏了IOContext：用户写网络服务，只需要关心连接、读写和超时，不需要关心背后跑了几个 context、谁在驱动事件循环、停机时谁负责收尾。`IOContext` 还在，只是不再出现在用户需要阅读和维护的代码里。这一步做完之后，`ReceiveStream`、timeout、buffer ring 这些能力继续扩展，API 也不会再被迫回到"先传 context，再谈业务"的旧写法。
+用户写网络服务，只需要关心连接、读写和超时，不需要关心背后跑了几个 context、谁在驱动事件循环、停机时谁负责收尾。`IOContext` 还在，只是不再出现在用户需要阅读和维护的代码里。这一步做完之后，`ReceiveStream`、timeout、buffer ring 这些能力继续扩展，API 也不会再被迫回到"先传 context，再谈业务"的旧写法。
