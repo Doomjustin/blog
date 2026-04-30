@@ -10,12 +10,9 @@
 
 ### 1. 问题根源：内存布局与系统调用边界
 
-标准的 `write(2)` 系统调用接受的是一块连续的 `(void* buf, size_t count)`。要发送分散在多处的数据，传统上有两种方案：
+标准的 `write(2)` 系统调用接受的是一块连续的 `(void* buf, size_t count)`。要发送分散在多处的数据，要么先 `memcpy` 拼成一块连续缓冲区再发——额外分配加拷贝，延迟上去了，缓存命中率下去了；要么依次对每块数据调用 `write`——多次内核陷入加不可避免的时序问题。
 
-1. **拼接再发送**：将所有数据 `memcpy` 到一块连续缓冲区，再调用一次 `write`。代价是额外的内存分配与拷贝，延迟增加，CPU 缓存命中率下降。
-2. **多次调用**：依次对每块数据各调用一次 `write`。代价是多次用户态 ↔ 内核态的上下文切换，以及不可避免的时序问题。
-
-POSIX 标准的答案是 `writev(2)`：
+POSIX 的答案是 `writev(2)`：
 
 ```c
 ssize_t writev(int fd, const struct iovec *iov, int iovcnt);
@@ -234,6 +231,24 @@ struct CancelableOperation : public Operation {
 
 `WriteAllAwaiter` 继承自 `CancelableOperation`，并在 `complete()` 中通过 `resume()` 而非直接调用 `handle_.resume()`。关键在于 `resume()` 只在**整个操作最终完成或出错**时才被调用——中间每次部分写入完成后，`complete()` 直接调用 `arm_write()` 重新提交，不经过 parent。只有当 `buffer_.empty()`（写完）或 `error_code_ != 0`（出错/被取消）时，才通过 `resume()` 将结果路由出去。这样 parent 只需处理一次最终事件，而不是每次重试。
 
+这段逻辑如果只看文字会比较绕，可以把它压成一个事件时序：
+
+```text
+[User Coroutine]          [TimeoutCombinator]             [io_uring]
+    |                         |                            |
+    |-- co_await timeout() -->|                            |
+    |                         |-- submit timer SQE ------->|
+    |                         |-- submit write_all SQE --->|
+    |                         |                            |
+    |                         |<-- CQE(write partial) ---- |  (继续 arm_write)
+    |                         |<-- CQE(write done) ---- ---|  (或 error)
+    |                         |-- cancel(timer) ---------->|
+    |                         |<-- CQE(timer canceled) ----|
+    |<------------------------|  resume once               |
+```
+
+另一条分支是 timer 先到期：`TimeoutCombinator` 会反向 cancel 当前飞行中的 write/read SQE，同样等两边 CQE 都收干净后再恢复协程。核心目标只有一个：**恢复一次，但把飞行中的请求收尾做完整**。
+
 有了这个基础，`TimeoutCombinator` 就可以实现真正的独立定时器了：
 
 ```cpp
@@ -301,13 +316,13 @@ auto r2 = co_await timeout(socket.async_read_all(buf), 5s);
 
 #### 6.3 为什么不需要序列版 WriteAll
 
-看到这里，你可能会问：我们有 `WriteSequenceAwaiter`（序列版 `write_some`），是否也需要一个序列版 `write_all`？
+既然有了序列版 `write_some`，很自然会想到要不要同时提供序列版 `write_all`。
 
-答案是**不需要**。
+答案是不需要。
 
 `writev` 的关键语义是**原子性**：内核保证整个 `iovec` 数组作为一个整体提交给协议栈。对于流式套接字（`SOCK_STREAM`），内核要么接受全部数据进入发送缓冲区，要么在缓冲区不足时只接受一部分。
 
-但这里有一个根本性的约束：**`writev` 的部分写入发生后，你无法简单地"重试剩余部分"**。每次 `writev` 写入 N 字节后，你需要遍历 `iovec` 数组，跳过已完整写入的 chunk，并修剪部分写入那个 chunk 的 `iov_base`/`iov_len`，然后以剩余的 `iovec` 子集重新提交：
+但这里有一个根本性的约束：**`writev` 发生部分写入后，没有办法简单地"重试剩余部分"**。每次写入 N 字节后，需要遍历 `iovec` 数组，跳过已完整写入的 chunk，并修剪部分写入那个 chunk 的 `iov_base`/`iov_len`，然后以剩余的 `iovec` 子集重新提交：
 
 ```cpp
 // 如果要实现序列版 write_all，必须处理这种修剪逻辑
@@ -328,7 +343,7 @@ void advance(std::size_t n) {
 
 这并非不可实现，但代价是显著的复杂度提升，而实际收益却微乎其微——实践中发送缓冲区充足时 `writev` 极少发生部分写入。
 
-更重要的是，`writev` 的使用场景本身就决定了调用方通常不关心"是否全部写完"：当你用 `writev` 拼装一个 HTTP 响应时，你的目标是**原子地将头部和体部交给内核**，至于内核何时真正通过 TCP 发出去，不是这一层要操心的。这与 `write_all` 的语义（"确保用户层的所有字节都离开应用缓冲区"）本质上是两个不同的问题。
+更重要的是，`writev` 的使用场景本身就决定了调用方通常不关心"是否全部写完"：用 `writev` 拼装一个 HTTP 响应，目标是**原子地将头部和体部交给内核**，至于内核何时真正通过 TCP 发出去，不是这一层要操心的。这与 `write_all` 的语义（"确保用户层的所有字节都离开应用缓冲区"）本质上是两个不同的问题。
 
 因此，我们的设计决策是：
 

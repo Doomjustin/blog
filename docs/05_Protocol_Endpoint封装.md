@@ -145,11 +145,7 @@ private:
 现在，我们来到了最核心的部件 `BasicEndpoint`。它需要将前面实现的 `Protocol`、`Address` 与端口（Port）结合起来，并最终生成底层的 `sockaddr` 结构供内核使用。
 
 #### 3.1 为什么引入 Protocol 模板参数？
-你可能会疑惑：既然 IP 层的底层表示都是 `sockaddr`，为什么我们要设计成模板类 `BasicEndpoint<Protocol>`，而不是一个通用的 `Endpoint` 类？
-
-这是出于 **强类型安全** 的考量。
-TCP 的 `127.0.0.1:80` 和 UDP 的 `127.0.0.1:80` 在底层字节上完全一致，但在物理逻辑上是截然不同的通道。如果它们是同一个类型，开发者极易将 UDP 的端点传给 TCP 的 Socket 进行 `connect`，这种谬误只能在运行时由内核抛出异常。
-通过 `Protocol` 模板，`endpoint<tcp>` 和 `endpoint<udp>` 在 C++ 编译器眼中变成了绝对正交的两种类型，任何混用都会在编译期被拦截，这是零开销抽象的典范。
+底层表示同样是 `sockaddr`，设计成模板类 `BasicEndpoint<Protocol>` 而不是一个通用 `Endpoint`，原因是强类型安全。TCP 的 `127.0.0.1:80` 和 UDP 的 `127.0.0.1:80` 在内存字节上完全一致，但在物理逻辑上是截然不同的两条通道。如果是同一个类型，把 UDP 的端点传给 TCP 的 Socket 进行 `connect`，编译器全程不报错，只能等到运行时内核抛回错误。`Protocol` 模板把 `endpoint<tcp>` 和 `endpoint<udp>` 变成了两个不同的类型，混用在编译期就被拦截。
 
 #### 3.2 致命陷阱：为何 Endpoint 内部必须摒弃 std::variant？
 在封装 `Address` 时，我们使用了 `std::variant`。但在 `Endpoint` 内部存储底层结构时，却不能继续使用 `std::variant<sockaddr_in, sockaddr_in6>` 了，
@@ -161,7 +157,7 @@ TCP 的 `127.0.0.1:80` 和 UDP 的 `127.0.0.1:80` 在底层字节上完全一致
 2. **状态脱节（UB）**：假设 `variant` 当前为 IPv4（16字节），内核写入了 IPv6（28字节）的数据。内核无从知晓 C++ 的机制，绝不会去更新 `variant` 的 `index`。当 C++ 代码再次读取时，将发生严重的未定义行为（Undefined Behavior）。
 
 #### 3.3 解决方案：Union 与 sockaddr_storage
-为了在确保 C 兼容性的同时提供 C++ 视图，最标准的解决方案是：**使用 `union` 配合 `sockaddr_storage`。** 也借此机会，强调一下C++的底层哲学：**程序的世界没有银弹**。对于不同场景选择适合的方式，所以C++提供了大量特性。
+为了在确保 C 兼容性的同时提供 C++ 视图，最标准的解决方案是：**使用 `union` 配合 `sockaddr_storage`**。这里 C 和 C++ 提供的特性各有所长，选适合的就好，这也是为什么 C++ 设计上没有银弹的原因之一。
 
 ~~~cpp
 template<typename Protocol>
@@ -209,8 +205,8 @@ private:
     }
 ~~~
 
-* **Input 操作（`bind` / `connect`）**：内核要求**精确匹配**。如果你调用 `bind` 时传入了 128 字节（`capacity`），内核会因为长度不符合 IPv4（16）或 IPv6（28）的规约而直接返回 `-EINVAL`。必须严格使用动态计算的 `size()`。
-* **Output 操作（`accept`）**：内核要求提供**最大安全缓冲**。在双栈监听模式下，随时可能接入 28 字节的 IPv6 客户端。如果此时你传入的是 `size()`（若端点默认初始化为 v4，则为 16），内核会直接截断写入，导致提取到的客户端地址完全损坏。必须严格使用 `capacity()`。
+* **Input 操作（`bind` / `connect`）**：内核要求精确匹配。传入 128 字节（`capacity`）的话，内核会因为长度不符合 IPv4（16）或 IPv6（28）的规约而直接返回 `-EINVAL`，这里要用动态计算的 `size()`。
+* **Output 操作（`accept`）**：内核要求提供最大安全缓冲。双栈监听模式下随时可能接入 28 字节的 IPv6 客户端，如果传入的是 `size()`（端点默认初始化为 v4 则为 16），内核会直接截断写入，导致提取到的客户端地址完全损坏，这里要用 `capacity()`。
 
 ### 5. 拼图闭环：优雅的构造过程
 
@@ -241,7 +237,7 @@ private:
 
 至此，我们的 `Endpoint` 彻底打通了从上层字符串抽象到底层 C 语言裸内存的通路。它对外提供了严格的类型契约，对内完美化解了 ABI 边界的内存博弈。
 
-对了，不要忘了，在tcp中，导出我们的endpoint
+最后，还要在 tcp 中把 endpoint 一并导出：
 ~~~c++
 class tcp {
 public:

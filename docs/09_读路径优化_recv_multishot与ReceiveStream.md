@@ -4,45 +4,70 @@
 
 `recv_multishot` 能直接解决这件事：一次提交，对应后续多次完成。
 
-这里我们需要考虑以下问题：
+在开始之前，先确认一下当前库的状态。前几篇一路写下来，`IOContext` 一直是个比较扁平的类：持有一个 `io_uring` ring 句柄，提供 SQE 获取和事件循环驱动，加上 work 计数和 stop 信号：
 
-1. buffer 不再由调用方临时传入，那谁来持有和归还。
-2. 事件循环怎么判断一笔 multishot 操作到底算不算完成。
-3. 用户最终该怎么使用这套能力，才不会再次暴露底层细节。
+```cpp
+class IOContext {
+    ::io_uring ring_;
+    int event_fd_;
+    std::size_t outstanding_works_{ 0 };
+    std::atomic<bool> should_stop_{ false };
 
----
+    void run();
+    auto sqe() -> ::io_uring_sqe*;
+    void wakeup();
+    // CQE 分发 ...
+};
+```
 
-### 1. 从 multishot 目标开始
+socket 层的每个异步操作，把自己包装成 `Operation` 提交进 ring，CQE 回来时由 `IOContext` 分发回去。至于 buffer，一直是由调用方临时传入，操作完成后调用方自己处理生命周期。
 
-我们不是要推翻 `read_some`，而是要消掉高频场景里的重复提交。
-
-传统的 `async_read_some` 模型当然能用，但它要求调用方持续参与底层步骤：
-
-1. 业务层必须参与缓冲区管理。
-2. 每次读都要重新构造一笔新的 SQE。
-3. 热连接上的收包循环会不断重复同样的模板代码。
-
-`recv_multishot` 正好对准了这一点：把“多次提交”收敛成“一次提交，多次完成”。
-
-问题是，当它真的接进现有框架后，复杂度会立刻转移：调用方仍要处理 buffer 生命周期，`IOContext` 里也没有稳定位置安放 buffer ring 这类长寿命资源。到这一步，先要解决的就不是 awaiter 写法，而是职责边界。
-
-于是读路径先做职责重划：
-
-1. 事件循环继续负责 SQE/CQE 的调度。
-2. buffer ring 交给上下文长期持有和回收。
-3. 连接对象只暴露消费接口，而不是让业务层直接碰 buffer slot。
-
-对应地，原本比较散的 `IOContext` 实现也被重新整理：和 ring 驱动、唤醒、CQE 分发有关的逻辑收进 `Scheduler`；和 buffer ring 建立、默认组选择、槽位归还有关的逻辑收进 `BufferRingGroup`；`IOContext` 自己只保留对外协调接口和 work tracking。
-
-这不是为了“代码好看”，而是为了把复杂度放回正确位置。继续把这些逻辑混在一个类里，后面无论接收流、buffer 池复用还是取消清理，都会越来越难理顺。
-
-如果不做这一步，代码大概会往一个很尴尬的方向长：`IOContext` 一边负责 `submit_and_wait`、wakeup、CQE 分发，一边还要记住有哪些 buffer group、默认组是谁、slot 该怎么归还；socket 层再额外拿着 `bgid` 和 `bid` 到处传。代码当然还能跑，只是边界会越来越散：事件循环知道太多 buffer 细节，socket 接口又背着一堆本不该暴露出来的资源管理问题。
+这个结构目前是干净的，但 `recv_multishot` 要求的东西比这多一层。
 
 ---
 
-### 2. `IOContext` 为什么必须先重构
+### 1. 直接加进去会碰到什么
 
-直接把 multishot 逻辑塞进原有上下文，会把“调度职责”和“资源职责”搅在一起。现在的 `IOContext` 把这两类职责拆开：
+`recv_multishot` 需要 buffer ring：内核不再接受调用方临时传入的单块 buffer，而是要求预先注册一组固定大小的槽位。每次有数据到达，内核从 ring 里借一个槽位写入，CQE 里带上这次借出的槽位编号，调用方读完数据后再把槽位还回去。
+
+最直接的想法是往 `IOContext` 里加几个字段：
+
+```cpp
+class IOContext {
+    ::io_uring ring_;
+    int event_fd_;
+    std::size_t outstanding_works_{ 0 };
+    std::atomic<bool> should_stop_{ false };
+
+    // 新加的 buffer ring 管理
+    std::unordered_map<unsigned, BufferRing> buffer_rings_;
+    unsigned next_bgid_{ 0 };
+    std::optional<unsigned> default_bgid_;
+};
+```
+
+功能上能跑，但麻烦随之而来。
+
+第一，`IOContext` 现在要同时处理两类完全不同的事情：一类是"这一次 submit_and_wait 怎么跑、CQE 怎么分发"，另一类是"有哪些 buffer 组被注册在内核里、槽位怎么借出和归还"。这两件事没有天然的耦合关系，混在一起只会让两侧的逻辑都难以单独修改。
+
+第二，更直接的问题出在 CQE 分发上。之前"一个 CQE 对应一次操作完成"的判断，在 multishot 里不再成立——事件循环必须识别 `IORING_CQE_F_MORE`，在这个 flag 还存在时不能把这笔 work 从计数里扣掉。这不是细节调整，而是分发逻辑本身语义的变化。如果这块逻辑和 buffer ring 管理搅在同一段代码里，两边会互相干扰。
+
+第三，socket 层如果要用 buffer ring，就必须拿到 `bgid` 和 `bid`，然后到处传。调用方写业务代码时不该感知这些细节，但没有合适的封装层，这些细节就只能往上漏。
+
+所以在写 multishot awaiter 之前，要先把 `IOContext` 的职责拆开：
+
+1. 和 ring 驱动、唤醒、CQE 分发有关的逻辑，收进独立的 `Scheduler`。
+2. buffer ring 的建立、槽位借出和归还，收进独立的 `BufferRingGroup`。
+3. `IOContext` 自己只保留对外协调接口和 work tracking。
+4. socket 层只暴露消费接口，不让业务层直接碰 buffer slot。
+
+这不是为了"代码好看"，而是为了把复杂度放回正确位置。不做这一步，后面无论接收流、buffer 池复用还是取消清理，都会越来越难理顺。
+
+---
+
+### 2. 重构后的 `IOContext`
+
+拆分后的 `IOContext` 把两类职责分别交给两个内部类：
 
 ```cpp
 class IOContext {
@@ -301,6 +326,23 @@ public:
 
 `recv_multishot` 有一个天然特征：协程还没来得及再次 `co_await next()`，它就可能已经连续产出了多个 CQE。如果没有队列，后到的结果只能覆盖先到的结果，或者逼着 `handle_cqe()` 当场恢复协程并同步消化所有数据，这两种都不对。
 
+把这段行为画成时序会直观很多：
+
+```text
+[Kernel multishot]          [ReceiveStream]                 [User Coroutine]
+    |                           |                                |
+    |-- CQE #1 ---------------->| push ready_results_            |
+    |-- CQE #2 ---------------->| push ready_results_            |
+    |-- CQE #3 ---------------->| push ready_results_            |
+    |                           |                                |
+    |                           |<----------- co_await next() ---|
+    |                           | pop #1 and resume              |
+    |                           |<----------- co_await next() ---|
+    |                           | pop #2 and resume              |
+```
+
+也就是说，`ready_results_` 不是优化项，而是 `recv_multishot` 能以“生产者-消费者节奏解耦”方式暴露给上层 API 的必要条件。
+
 用 `std::deque<result_type>` 把结果先存起来，问题就顺了：
 
 1. CQE 到达时，先转成 `PooledBuffer` 或 error，推进队列。
@@ -367,7 +409,7 @@ void handle_cqe(int result, std::uint32_t flags) noexcept
 
 问题在于：当 `ReceiveStream` 析构时，内核里那笔 multishot 请求不一定已经结束。你当然可以提交一个 cancel SQE，但 cancel 也是异步的，在 cancel 的 CQE 真正回来之前，原来的 multishot CQE 仍然可能再到一次。这个窗口期一旦处理不好，要么 use-after-free，要么 buffer 泄漏。
 
-现在的解法很稳：析构时不直接删 operation，而是先 `detach()`。
+解决办法是：析构时不直接删 operation，而是先 `detach()`。
 
 ```cpp
 void destroy() noexcept

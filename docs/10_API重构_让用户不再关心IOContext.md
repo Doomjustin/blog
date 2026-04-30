@@ -1,5 +1,41 @@
 前几篇一路写下来，我们已经把 `io_uring` 的关键能力都接进了库：awaiter、timeout、socket、acceptor、`recv_multishot`、`ReceiveStream`。功能越来越完整，但也暴露出一个更现实的问题：API 是否还在逼用户理解本不该由他承担的运行时细节。
 
+先把这篇最核心的用户体验变化放在最前面：
+
+```cpp
+// 以前：业务函数签名一路携带 IOContext
+auto server(async::IOContext& context) -> async::Task<>
+{
+    auto endpoint = net::ip::tcp::endpoint{ net::ip::AddressV6::loopback(), 12345 };
+    auto acceptor = net::ip::tcp::acceptor{ endpoint, true, context };
+
+    while (true) {
+        auto client = co_await acceptor.async_accept();
+        if (!client)
+            continue;
+
+        async::co_spawn(session(std::move(*client), context));
+    }
+}
+
+// 现在：业务代码只表达连接逻辑，context 退回运行时内部
+auto server() -> async::Task<>
+{
+    auto endpoint = net::ip::tcp::endpoint{ net::ip::AddressV6::loopback(), 12345 };
+    auto acceptor = net::ip::tcp::acceptor{ endpoint, true };
+
+    while (true) {
+        auto client = co_await acceptor.async_accept();
+        if (!client)
+            continue;
+
+        async::co_spawn(session(std::move(*client)));
+    }
+}
+```
+
+下面这篇要解释的，就是这件事是怎么做到的，以及它的边界在哪里。
+
 最典型的细节，就是 `IOContext`。
 
 `IOContext` 在框架内部当然是核心，事件循环、SQE/CQE 调度、work 计数都离不开它。真正让人犹豫的是另一件事: 用户代码里要不要处处显式传 `IOContext&`。
@@ -47,7 +83,26 @@ auto context() -> IOContext&
 }
 ```
 
-第一次访问时创建，之后同线程复用。这样一来，很多接口就可以把 context 作为默认参数内收。`StreamSocket`、`BasicAcceptor` 已经是这个方向，用户代码自然回到“写网络协程”本身，而不是在每层函数签名里搬运 `IOContext&`。
+第一次访问时创建，之后同线程复用。这样一来，很多接口就可以把 context 作为默认参数内收。`StreamSocket`、`BasicAcceptor` 已经是这个方向：
+
+```cpp
+// 之前（doc 07 的签名）：context 必须显式传入
+BasicAcceptor(Context& context, const endpoint_type& endpoint, bool enable_reuse_port = false);
+
+// 现在：context 带了默认值，来自线程局部存储
+BasicAcceptor(const endpoint_type& endpoint, bool enable_reuse_port = false,
+              context_type& context = async::this_coroutine::context());
+```
+
+`StreamSocket` 的各个构造函数同样如此：
+
+```cpp
+explicit StreamSocket(context_type& context = async::this_coroutine::context());
+StreamSocket(const Protocol& protocol, context_type& context = async::this_coroutine::context());
+StreamSocket(int fd, context_type& context = async::this_coroutine::context());
+```
+
+用户代码自然回到"写网络协程"本身，而不是在每层函数签名里搬运 `IOContext&`。
 
 这一点在调用体验上的变化非常明显。过去写 server 逻辑，常常会先铺一层 context plumbing，再进入 accept/read/write；现在可以直接围绕连接、会话、超时去组织代码。`co_spawn(session(...))` 看起来更轻，不是因为框架放松了约束，而是因为约束被移回了运行时内部。
 

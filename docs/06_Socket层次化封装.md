@@ -10,25 +10,15 @@
 
 ### 1\. 宏观架构
 
-POSIX 系统为网络通信提供了极度灵活但也极其松散的 C API。在现代 C++ 中，核心接口设计原则是：**让接口易于正确使用，难以被误用**。为此，我们必须根据网络协议的物理行为特征，将 Socket 拆解为层次分明的类簇：
+POSIX 系统的网络 API 层极灵活，但也为此付出了类型安全的代价。我想把这层正了回来。
 
-1.  **`BaseSocket`**：
-    所有套接字的基类。其唯一职责是：**基于 RAII 原则管理文件描述符（fd）的生命周期**，并提供底层统一的套接字选项（Socket Options）配置接口。
+`BaseSocket` 做最底层，唯一的职责是 RAII 管理文件描述符生命周期，以及提供统一的套接字选项配置接口。在此基础上，按照物理行为展开三个子类：`Acceptor` 只干监听和接收连接的事，剪掉了所有读写接口；`StreamSocket` 专为 TCP 这类有连接字节流存在的，开放 `connect`、`read_some` 和 `write_some`；`DatagramSocket` 就是 UDP 这类无连接的，只有 `send_to` 和 `receive_from`。
 
-2.  **`Acceptor`（被动接收器）**：
-    继承自 `BaseSocket`。专门用于服务端监听。仅开放 `bind`、`listen` 和 `accept` 接口。它剥离了数据读写能力，因为监听套接字本身不应参与数据载荷的收发。
-
-3.  **`StreamSocket`（流式套接字）**：
-    继承自 `BaseSocket`。代表**面向连接、可靠的字节流通信**（如 `ip::tcp` 或本机流式 IPC `local::stream_protocol`）。开放 `connect`、`read_some` 和 `write_some` 接口。
-
-4.  **`DatagramSocket`（数据报套接字）**：
-    继承自 `BaseSocket`。代表**无连接、不可靠的数据报通信**（如 `ip::udp`）。无 `connect` 语义，仅开放 `send_to` 和 `receive_from` 接口。
-
-通过这一分层，若业务代码试图在 UDP Socket 上调用 `accept`，编译器将在编译阶段直接抛出“找不到该成员函数”的错误。我们将潜在的运行时崩溃彻底转化为编译期约束。同时，该架构也为未来扩充不同的协议栈保留了正交性。
+这样分下来，在 UDP Socket 上调用 `accept` 这种错误在编译期就能被拦截，同时也为将来扩充其他协议栈保持了正交性。
 
 ### 2\. 契约先行：Protocol 的 Concept 约束
 
-在泛型编程中，必须确保传入的模板参数是合法的协议类型。根据上文对 TCP 的设计，协议需要提供调用 `::socket()` 系统调用所需的三要素：`domain`、`type` 和 `protocol`。
+模板参数是什么类型都可以传，这里用 Concept 把合法的协议类型明确写出来。根据 TCP 的设计，协议需要提供调用 `::socket()` 系统调用所需的三要素：`domain`、`type` 和 `protocol`。
 
 我们使用 C++20 的 Concept 来定义这一显式契约：
 
