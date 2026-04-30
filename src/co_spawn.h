@@ -3,6 +3,7 @@
 
 #include "awaitable.h"
 #include "detached_task.h"
+#include "this_coroutine.h"
 #include "tracking_context.h"
 
 /**
@@ -30,6 +31,13 @@ template<tracking_context Context, awaitable Awaitable>
 auto co_spawn(Context& ctx, Awaitable awaitable) -> DetachedTask<Context>
 {
     co_await std::move(awaitable);
+}
+
+template<awaitable Awaitable>
+    requires std::movable<std::remove_cvref_t<Awaitable>>
+void co_spawn(Awaitable awaitable)
+{
+    co_spawn(this_coroutine::context(), std::move(awaitable));
 }
 
 #endif // BLOG_CO_SPAWN_H

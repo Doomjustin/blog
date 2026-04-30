@@ -1,5 +1,5 @@
-#ifndef BLOG_WRITE_ALL_WAITER_H
-#define BLOG_WRITE_ALL_WAITER_H
+#ifndef BLOG_WRITE_ALL_AWAITER_H
+#define BLOG_WRITE_ALL_AWAITER_H
 
 #include <cerrno>
 #include <coroutine>
@@ -13,6 +13,20 @@
 #include "exceptions.h"
 #include "operation.h"
 
+/**
+ * @brief Suspend until an entire buffer has been sent via io_uring.
+ *
+ * Unlike `WriteSomeAwaiter`, which issues a single `send` and returns
+ * however many bytes were accepted, this awaiter retries until the full
+ * span has been delivered or an error occurs. Partial writes resubmit the
+ * remainder automatically without suspending the caller again.
+ *
+ * Derives from `CancelableOperation` so it can be wrapped by
+ * `TimeoutCombinator`; the `parent` pointer routes completions through the
+ * combinator when a timeout is active.
+ *
+ * @tparam Context Execution context type (must provide `sqe()`).
+ */
 template<typename Context>
 class WriteAllAwaiter: public CancelableOperation {
 public:
@@ -24,6 +38,8 @@ public:
         socket_{ socket }, 
         buffer_{ buffer }
     {}
+
+    ~WriteAllAwaiter() = default;
 
     [[nodiscard]]
     constexpr auto await_ready() const noexcept -> bool
@@ -79,10 +95,9 @@ private:
     {
         if (result > 0) {
             bytes_written_ += static_cast<std::size_t>(result);
-
             buffer_ = buffer_.subspan(result);
         }
-        else if (result == 0 && bytes_written_ > 0) {
+        else if (result == 0) {
             error_code_ = ECONNABORTED;
         }
         else
@@ -90,4 +105,4 @@ private:
     }
 };
 
-#endif // BLOG_WRITE_ALL_WAITER_H
+#endif // BLOG_WRITE_ALL_AWAITER_H

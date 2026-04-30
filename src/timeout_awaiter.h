@@ -136,6 +136,15 @@ private:
 };
 
 
+/**
+ * @brief Constrain operations that support mid-flight cancellation via a parent combinator.
+ *
+ * A cancelable operation must:
+ * - Expose a `resume_type` result alias.
+ * - Return an lvalue reference from `context()`.
+ * - Accept `await_suspend(handle)` so `TimeoutCombinator` can call it.
+ * - Derive from `CancelableOperation` so the `parent` pointer mechanism is available.
+ */
 template<typename T>
 concept cancelable_operation = requires(T& t)
 {
@@ -146,6 +155,21 @@ concept cancelable_operation = requires(T& t)
 } && std::derived_from<T, CancelableOperation>;
 
 
+/**
+ * @brief Wrap a `CancelableOperation` with an independent timer and mutual cancellation.
+ *
+ * Unlike `TimeoutAwaiter` (which uses `IOSQE_IO_LINK`), `TimeoutCombinator` submits
+ * the inner operation and a separate `io_uring_prep_timeout` SQE independently, then
+ * cancels whichever side loses the race:
+ * - If the timer fires first (`on_timer_completed`), the inner operation is cancelled
+ *   and `await_resume` returns `std::errc::timed_out`.
+ * - If the inner operation completes first (`complete`), the timer SQE is cancelled.
+ *
+ * Both CQEs must arrive before the coroutine is resumed (`pending_cqes_` starts at 2).
+ * Cancel SQEs use `sqe(false)` so they do not increment the outstanding-work counter.
+ *
+ * @tparam Awaiter Cancelable awaiter type satisfying `cancelable_operation`.
+ */
 template<cancelable_operation Awaiter>
 class TimeoutCombinator: public CancelableOperation {
 public:

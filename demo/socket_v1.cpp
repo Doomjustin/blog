@@ -13,11 +13,11 @@
 #include "io_context.h"
 #include "operation.h"
 #include "option.h"
-#include "readsome_awaiter.h"
+#include "read_some_awaiter.h"
 #include "signals.h"
 #include "task.h"
 #include "timeout.h"
-#include "writesome_awaiter.h"
+#include "write_some_awaiter.h"
 
 template<typename Socket>
 class AcceptAwaiter: public Operation {

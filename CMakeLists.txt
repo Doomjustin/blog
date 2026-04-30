@@ -23,6 +23,7 @@ find_package(Microsoft.GSL CONFIG REQUIRED)
 find_package(glaze CONFIG REQUIRED)
 find_package(ctre CONFIG REQUIRED)
 find_package(asio CONFIG REQUIRED)
+find_package(magic_enum CONFIG REQUIRED)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(liburing REQUIRED IMPORTED_TARGET liburing)

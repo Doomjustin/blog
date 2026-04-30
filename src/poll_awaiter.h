@@ -36,6 +36,8 @@ public:
         events_{ events }
     {}
 
+    ~PollAwaiter() = default;
+
     [[nodiscard]]
     constexpr auto await_ready() const noexcept -> bool { return false; }
 

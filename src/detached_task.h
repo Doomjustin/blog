@@ -27,14 +27,13 @@ struct DetachedTask {
         /**
          * @brief Register one unit of outstanding work with the context.
          *
-         * @param ctx Context that drives the spawned coroutine.
-         * @param awaitable The awaitable being run (accepted but not stored;
-         *                  included so the compiler can resolve the constructor).
-         */
-        /**
-         * @param ctx        Context that drives the spawned coroutine.
-         * @param awaitable  Forwarded from `co_spawn`'s argument list via coroutine
-         *                   promise constructor injection; captured but not stored here.
+         * Invoked via coroutine promise constructor injection using `co_spawn`'s
+         * argument list. `awaitable` is accepted to satisfy the injection protocol
+         * but is not stored here; it is moved into the coroutine body by the
+         * compiler-generated frame setup.
+         *
+         * @param ctx       Context that drives the spawned coroutine.
+         * @param awaitable Awaitable forwarded from `co_spawn`; not stored.
          */
         template<typename Awaitable>
         promise_type(Context& ctx, Awaitable&& awaitable)
@@ -53,12 +52,26 @@ struct DetachedTask {
 
         auto get_return_object() noexcept { return DetachedTask{}; }
 
+        /** @brief Start executing immediately; the spawner does not wait. */
         auto initial_suspend() noexcept { return std::suspend_never{}; }
 
+        /**
+         * @brief Destroy the frame on completion without suspending.
+         *
+         * There is no join point, so the frame can be reclaimed immediately.
+         * The work counter is decremented by the destructor.
+         */
         auto final_suspend() noexcept { return std::suspend_never{}; }
 
         void return_void() noexcept {}
 
+        /**
+         * @brief Terminate the process on unhandled exceptions.
+         *
+         * Silently swallowing exceptions in detached tasks hides bugs that are
+         * otherwise impossible to diagnose. Calling `std::terminate` surfaces
+         * them immediately with a stack trace.
+         */
         void unhandled_exception() noexcept
         {
             std::terminate();

@@ -4,6 +4,9 @@
 #include <thread>
 #include <vector>
 
+#include <spdlog/spdlog.h>
+
+#include "async_operations.h"
 #include "buffer.h"
 #include "co_spawn.h"
 #include "io_context.h"
@@ -11,7 +14,6 @@
 #include "ip/tcp.h"
 #include "signals.h"
 #include "task.h"
-#include "write.h"
 
 static const auto header = std::string{ "HTTP/1.1 200 OK\r\nContent-Length: 65536\r\n\r\n" };
 
@@ -109,7 +111,7 @@ auto session(ip::tcp::socket<Context> socket) -> Task<>
             break;
         }
 
-        auto bytes_written = co_await write(socket, buffer(response_ok));
+        auto bytes_written = co_await async_write(socket, buffer(response_ok));
         // auto bytes_written = co_await socket.async_write_some(response_sequence);
         if (!bytes_written) {
             if (!is_peer_shutdown(bytes_written.error()))

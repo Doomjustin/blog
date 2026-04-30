@@ -7,7 +7,8 @@
     "glaze",
     "liburing",
     "jemalloc",
-    "asio"
+    "asio",
+    "magic-enum"
   ],
   "name": "blog",
   "version": "0.0.1",

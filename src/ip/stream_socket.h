@@ -6,10 +6,11 @@
 #include <sys/socket.h>
 
 #include "operations.h"
-#include "readsome_awaiter.h"
+#include "read_some_awaiter.h"
+#include "receive_stream.h"
 #include "socket.h"
 #include "write_sequence_awaiter.h"
-#include "writesome_awaiter.h"
+#include "write_some_awaiter.h"
 
 namespace ip {
 
@@ -53,14 +54,35 @@ public:
      */
     using no_delay = BooleanOption<IPPROTO_TCP, TCP_NODELAY>;
 
+    /**
+     * @brief Deferred-open constructor; socket is not yet created.
+     *
+     * Use when the protocol or remote address is determined at runtime
+     * and the socket needs to be explicitly opened later.
+     */
     explicit StreamSocket(Context& context)
       : base_socket_type{ context }
     {}
 
+    /**
+     * @brief Eagerly open a socket from a protocol descriptor.
+     *
+     * Use when the protocol is known at construction time and the socket
+     * should be ready for option-setting or `connect()` immediately.
+     */
     StreamSocket(Context& context, const Protocol& protocol)
       : base_socket_type{ context, protocol }
     {}
 
+    /**
+     * @brief Adopt an existing file descriptor.
+     *
+     * Used by acceptors to wrap a kernel-assigned fd after `accept(2)`
+     * without calling `socket(2)` again.
+     *
+     * @param fd An already-opened, connected socket fd.
+     * @pre `fd` must be a valid socket; ownership is transferred to this object.
+     */
     StreamSocket(Context& context, int fd)
       : base_socket_type{ context, fd }
     {}
@@ -158,6 +180,19 @@ public:
         -> WriteSequenceAwaiter<Context, Buffer>
     {
         return WriteSequenceAwaiter<Context, Buffer>{ this->context(), this->native_handle(), buffer };
+    }
+
+    auto receive_stream() -> ReceiveStream<Context>
+    {
+        auto default_bgid = this->context().default_buffer();
+        if (!default_bgid)
+            throw std::runtime_error{ "No default buffer ring available for receive stream" };        
+        return ReceiveStream<Context>{ this->context(), this->native_handle(), *default_bgid };
+    }
+
+    auto receive_stream(unsigned bgid) -> ReceiveStream<Context>
+    {
+        return ReceiveStream<Context>{ this->context(), this->native_handle(), bgid };
     }
 };
 

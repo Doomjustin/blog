@@ -3,6 +3,7 @@
 
 #include <spdlog/spdlog.h>
 
+#include "async_operations.h"
 #include "buffer.h"
 #include "co_spawn.h"
 #include "io_context.h"
@@ -10,7 +11,6 @@
 #include "signals.h"
 #include "task.h"
 #include "timeout.h"
-#include "write.h"
 
 auto shutdown_monitor(IOContext& context) -> Task<void>
 {
@@ -49,7 +49,7 @@ auto session(ip::tcp::socket<IOContext> client) -> Task<>
 
         // 2. 利用 std::span 提取有效数据视图，异步写回
         using namespace std::literals::chrono_literals;
-        auto write_result = co_await timeout(write(client, write_buffer), 1ms);
+        auto write_result = co_await timeout(async_write(client, write_buffer), 1ms);
         if (!write_result) {
             if (write_result.error() == std::errc::timed_out)
                 spdlog::warn("Write to client {} timed out", client.native_handle());

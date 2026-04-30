@@ -50,6 +50,8 @@ public:
         }
     }
 
+    ~WriteSequenceAwaiter() = default;
+
     [[nodiscard]]
     constexpr auto await_ready() const noexcept -> bool
     {

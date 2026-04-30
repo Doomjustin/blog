@@ -1,5 +1,5 @@
-#ifndef BLOG_WRITESOME_AWAITER_H
-#define BLOG_WRITESOME_AWAITER_H
+#ifndef BLOG_WRITE_SOME_AWAITER_H
+#define BLOG_WRITE_SOME_AWAITER_H
 
 #include <coroutine>
 #include <cstddef>
@@ -36,6 +36,8 @@ public:
     WriteSomeAwaiter(Context& context, int fd, std::span<const std::byte> buffer)
       : context_{ context }, fd_{ fd }, buffer_{ buffer }
     {}
+
+    ~WriteSomeAwaiter() = default;
 
     [[nodiscard]]
     constexpr auto await_ready() const noexcept -> bool
@@ -95,4 +97,4 @@ private:
     int error_code_ = 0;
 };
 
-#endif // BLOG_WRITESOME_AWAITER_H
+#endif // BLOG_WRITE_SOME_AWAITER_H

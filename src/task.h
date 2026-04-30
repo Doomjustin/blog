@@ -304,8 +304,7 @@ public:
     public:
         explicit Awaiter(handle_type handle)
           : handle_{ handle }
-        {
-        }
+        {}
 
         [[nodiscard]]
         auto await_ready() const noexcept -> bool

@@ -44,6 +44,8 @@ public:
             addrlen_ = peer_->capacity();
     } 
 
+    ~AcceptAwaiter() = default;
+
     [[nodiscard]] 
     constexpr auto await_ready() const noexcept -> bool
     {

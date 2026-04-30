@@ -5,9 +5,9 @@
 #include <sys/socket.h>
 
 #include "operations.h"
-#include "readsome_awaiter.h"
+#include "read_some_awaiter.h"
 #include "socket.h"
-#include "writesome_awaiter.h"
+#include "write_some_awaiter.h"
 
 namespace ip {
 

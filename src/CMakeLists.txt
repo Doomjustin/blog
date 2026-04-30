@@ -1,19 +1,19 @@
-file(GLOB BLOG_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/*.h")
-file(GLOB BLOG_IMPLEMENT_SOURCE CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/*.cpp")
-file(GLOB BLOG_TEST_SOURCE CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/*.test.cpp")
-
-list(FILTER BLOG_IMPLEMENT_SOURCE EXCLUDE REGEX "\\.test\\.cpp$")
+add_subdirectory(blog)
 
 
-add_library(blog ${BLOG_IMPLEMENT_SOURCE})
+file(GLOB BLOG_DEMO_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/*.h")
+file(GLOB BLOG_DEMO_IMPLEMENT_SOURCE CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/*.cpp")
 
-add_library(blog::blog ALIAS blog)
 
-target_compile_features(blog PUBLIC cxx_std_23)
+add_library(demo ${BLOG_DEMO_IMPLEMENT_SOURCE})
 
-target_include_directories(blog PUBLIC ${CMAKE_CURRENT_LIST_DIR})
+add_library(blog::demo ALIAS demo)
 
-target_link_libraries(blog 
+target_compile_features(demo PUBLIC cxx_std_23)
+
+target_include_directories(demo PUBLIC ${CMAKE_CURRENT_LIST_DIR})
+
+target_link_libraries(demo 
     PUBLIC 
         spdlog::spdlog
         Microsoft.GSL::GSL
