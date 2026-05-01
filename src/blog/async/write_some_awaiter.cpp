@@ -17,9 +17,10 @@ void WriteSomeAwaiter::await_suspend(std::coroutine_handle<> handle) noexcept
     handle_ = handle;
 
     auto* sqe = context_.sqe();
-    
     prepare(sqe);
     ::io_uring_sqe_set_data(sqe, this);
+
+    context().track(this);
 }
 
 auto WriteSomeAwaiter::await_resume() noexcept -> std::expected<resume_type, std::error_code>
@@ -45,6 +46,7 @@ void WriteSomeAwaiter::set_result(int result, std::uint32_t flags) noexcept
 
 void WriteSomeAwaiter::complete(int result, std::uint32_t flags) noexcept
 {
+    context().untrack(this);
     set_result(result, flags);
 
     if (handle_) {

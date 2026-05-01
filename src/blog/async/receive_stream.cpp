@@ -26,6 +26,9 @@ public:
     {
         const bool has_more = (flags & IORING_CQE_F_MORE) != 0;
 
+        if (!has_more)
+            context_->untrack(this);
+
         if (stream_) {
             if (!has_more) {
                 stream_->operation_armed_ = false;
@@ -150,6 +153,8 @@ void ReceiveStream::arm_operation()
     sqe->buf_group = bgid_;
     ::io_uring_sqe_set_data(sqe, static_cast<Operation*>(operation_));
     operation_armed_ = true;
+
+    context_->track(operation_);
 }
 
 void ReceiveStream::destroy() noexcept
@@ -157,10 +162,7 @@ void ReceiveStream::destroy() noexcept
     if (operation_) {
         operation_->detach();
 
-        auto* sqe = context_->sqe(false);
-        ::io_uring_prep_cancel(sqe, static_cast<Operation*>(operation_), 0);
-        ::io_uring_sqe_set_data(sqe, nullptr);
-
+        context_->cancel(operation_);
         operation_ = nullptr;
     }
 

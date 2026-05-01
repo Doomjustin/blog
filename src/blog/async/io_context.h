@@ -12,7 +12,10 @@
 #include <sys/eventfd.h>
 #include <sys/poll.h>
 
+#include <gsl/gsl>
 #include <liburing.h>
+
+#include "async/operation.h"
 
 namespace async {
 
@@ -42,7 +45,7 @@ public:
     void run();
 
     [[nodiscard]]
-    auto sqe(bool tracking = true) -> ::io_uring_sqe*;
+    auto sqe() -> ::io_uring_sqe*;
 
     void stop();
 
@@ -57,15 +60,21 @@ public:
         return scheduler_.ring();
     }
 
+    void track(gsl::not_null<Operation*> operation) noexcept;
+
+    void untrack(gsl::not_null<Operation*> operation) noexcept;
+
+    void cancel(gsl::not_null<Operation*> operation) noexcept;
+
     void add_work() noexcept
     {
-        ++outstanding_works_;
+        ++tracking_operations_;
     }
 
     void drop_work() noexcept
     {
-        assert(outstanding_works_ > 0);
-        --outstanding_works_;
+        assert(tracking_operations_ > 0);
+        --tracking_operations_;
     }
 
     auto setup_buffer_ring(unsigned entries, unsigned size) -> unsigned
@@ -113,7 +122,7 @@ private:
 
         auto sqe() -> ::io_uring_sqe*;
 
-        auto schedule() -> unsigned;
+        void schedule();
 
     private:
         static constexpr auto WAKEUP_MARKER = std::numeric_limits<std::uintptr_t>::max();
@@ -179,7 +188,9 @@ private:
     Scheduler scheduler_;
     BufferRingGroup buffers_;
 
-    std::size_t outstanding_works_{ 0 };
+    Operation* head_{ nullptr };
+    Operation* tail_{ nullptr };
+    std::size_t tracking_operations_{ 0 };
     std::atomic<bool> should_stop_{ false };
 };
 

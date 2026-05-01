@@ -90,6 +90,8 @@ public:
 
         ::io_uring_prep_link_timeout(timeout_sqe, &timeout_, 0);
         ::io_uring_sqe_set_data(timeout_sqe, this);
+
+        context().track(this);
     }
 
     auto await_resume() noexcept -> std::expected<resume_type, std::error_code>
@@ -114,7 +116,8 @@ public:
         set_result(result, flags);
 
         if (--pending_cqes_ == 0) {
-            auto handle = std::exchange(handle_, {});
+            context().untrack(this);
+            auto handle = std::exchange(handle_, nullptr);
             handle.resume();
         }
     }
@@ -205,6 +208,7 @@ public:
         ::io_uring_prep_timeout(sqe, &timeout_, 0, 0);
         ::io_uring_sqe_set_data(sqe, &timer_);
 
+        context().track(&timer_);
         awaiter_.await_suspend(handle);
     }
 
@@ -221,15 +225,12 @@ public:
         // 如果内层操作先完成了，取消定时器SQE以避免不必要的超时事件
         if (state_ == State::Pending) {
             state_ = State::AwaiterCompleted;
-
-            auto* sqe = context().sqe(false);
-            ::io_uring_prep_cancel(sqe, &timer_, 0);
-            ::io_uring_sqe_set_data(sqe, nullptr);
+            context().cancel(&timer_);
         }
 
         // 等到两个CQE都完成后才返回结果，避免丢失任何一个的完成事件
         if (--pending_cqes_ == 0) {
-            auto handle = std::exchange(handle_, {});
+            auto handle = std::exchange(handle_, nullptr);
             handle.resume();
         }
     }
@@ -257,6 +258,7 @@ private:
 
         void complete(int result, [[maybe_unused]] std::uint32_t flags) noexcept override
         {
+            owner->context().untrack(this);
             owner->on_timer_completed(result);
         }
     };
@@ -274,14 +276,11 @@ private:
         // 如果定时器先完成了，取消内层操作以避免不必要的处理
         if (state_ == State::Pending) {
             state_ = State::TimerCompleted;
-
-            auto* sqe = context().sqe(false);
-            ::io_uring_prep_cancel(sqe, &awaiter_, 0);
-            ::io_uring_sqe_set_data(sqe, nullptr);
+            context().cancel(&awaiter_);
         }
 
         if (--pending_cqes_ == 0) {
-            auto handle = std::exchange(handle_, {});
+            auto handle = std::exchange(handle_, nullptr);
             handle.resume();
         }
     }

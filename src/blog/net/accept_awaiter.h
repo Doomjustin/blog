@@ -59,9 +59,10 @@ public:
         handle_ = handle;
 
         auto* sqe = context_.sqe();
-        
         prepare(sqe);
         ::io_uring_sqe_set_data(sqe, this);
+
+        context().track(this);
     }
 
     auto await_resume() noexcept -> std::expected<resume_type, std::error_code>
@@ -92,6 +93,7 @@ public:
 
     void complete(int result, std::uint32_t flags) noexcept override
     {
+        context().untrack(this);
         set_result(result, flags);
 
         if (peer_ && result >= 0)

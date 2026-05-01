@@ -11,22 +11,26 @@ namespace async {
 
 void IOContext::run()
 {
-    while (!should_stop_.load(std::memory_order_relaxed) && outstanding_works_ > 0)
-    {
-        auto workdone = scheduler_.schedule();
+    while (tracking_operations_ > 0) {
+        // 如果用户调用了stop()，就取消所有未完成的操作
+        if (should_stop_.load(std::memory_order_relaxed)) {
+            auto* current = head_;
+            while (current) {
+                cancel(current);
+                current = current->next;
+            }
+        }
 
-        if (workdone > 0)
-            outstanding_works_ -= workdone;
+        scheduler_.schedule();
     }
 }
 
-auto IOContext::sqe(bool tracking) -> ::io_uring_sqe*
+auto IOContext::sqe() -> ::io_uring_sqe*
 {
     auto* sqe = scheduler_.sqe();
+    if (!sqe)
+        throw std::runtime_error("No SQE available");
 
-    if (tracking)
-        add_work();
-    
     return sqe;
 }
 
@@ -34,6 +38,47 @@ void IOContext::stop()
 {
     should_stop_.store(true, std::memory_order_relaxed);
     scheduler_.wakeup();
+}
+
+void IOContext::track(gsl::not_null<Operation*> operation) noexcept
+{
+    if (!head_) {
+        head_ = tail_ = operation;
+    }
+    else {
+        tail_->next = operation;
+        operation->prev = tail_;
+        tail_ = operation;
+    }
+
+    add_work();
+}
+
+void IOContext::untrack(gsl::not_null<Operation*> operation) noexcept
+{
+    if (operation->prev)
+        operation->prev->next = operation->next;
+    else
+        head_ = operation->next;
+
+    if (operation->next)
+        operation->next->prev = operation->prev;
+    else
+        tail_ = operation->prev;
+
+    operation->prev = operation->next = nullptr;
+    drop_work();
+}
+
+void IOContext::cancel(gsl::not_null<Operation*> operation) noexcept
+{
+    if (operation->is_canceling_) return;
+
+    if (auto* sqe = scheduler_.sqe()) {
+        ::io_uring_prep_cancel(sqe, operation, 0);
+        ::io_uring_sqe_set_data(sqe, nullptr);
+        operation->is_canceling_ = true;
+    }
 }
 
 
@@ -57,26 +102,20 @@ IOContext::Scheduler::~Scheduler()
 
 auto IOContext::Scheduler::sqe() -> ::io_uring_sqe*
 {
-    auto* sqe = ::io_uring_get_sqe(&ring_);
-    if (!sqe)
-        throw_system_error("io_uring_get_sqe");
-
-    return sqe;
+    return ::io_uring_get_sqe(&ring_);
 }
 
-auto IOContext::Scheduler::schedule() -> unsigned
+void IOContext::Scheduler::schedule()
 {
     auto res = ::io_uring_submit_and_wait(&ring_, 1);
     if (res < 0) {
-        if (res == -EINTR)
-            return 0;
+        if (res == -EINTR) return;
 
         throw_system_error("io_uring_submit_and_wait");
     }
         
     unsigned head;
     unsigned count{ 0 };
-    unsigned workdone{ 0 };
 
     io_uring_for_each_cqe(&ring_, head, cqe_) {
         ++count;
@@ -90,20 +129,11 @@ auto IOContext::Scheduler::schedule() -> unsigned
         if (::io_uring_cqe_get_data64(cqe_) != 0) {
             auto* op = static_cast<Operation*>(::io_uring_cqe_get_data(cqe_));
             op->complete(cqe_->res, cqe_->flags);
-
-            // 如果这个CQE的flags里有IORING_CQE_F_MORE，
-            // 说明这个操作后续还有CQE要处理，那就不应该减少outstanding_works_，因为它还没有完成；
-            if (cqe_->flags & IORING_CQE_F_MORE)
-                continue;
-
-            ++workdone;
         }
     }
 
     if (count > 0)
         ::io_uring_cq_advance(&ring_, count);
-
-    return workdone;
 }
 
 void IOContext::Scheduler::wakeup()

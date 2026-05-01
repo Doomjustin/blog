@@ -15,6 +15,10 @@ namespace async {
  * calls `complete` to deliver the result and resume the waiting coroutine.
  */
 struct Operation {
+    Operation* prev{ nullptr };
+    Operation* next{ nullptr };
+    bool is_canceling_{ false };
+    
     virtual ~Operation() = default;
 
     /**

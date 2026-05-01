@@ -70,6 +70,8 @@ public:
 
         prepare(sqe);
         ::io_uring_sqe_set_data(sqe, this);
+
+        context().track(this);
     }
 
     /**
@@ -104,6 +106,7 @@ public:
     /** @brief Complete callback from event loop; records result and resumes waiter. */
     void complete(int result, std::uint32_t flags) noexcept override
     {
+        context().untrack(this);
         set_result(result, flags);
 
         if (handle_) {

@@ -60,6 +60,11 @@ auto echo() -> async::Task<>
     while (true) {
         auto client = co_await acceptor.async_accept(client_endpoint);
         if (!client) {
+            if (client.error() == std::errc::operation_canceled) {
+                log::info("Acceptor has been stopped, exiting echo server...");
+                co_return;
+            }
+            
             log::warning("Failed to accept connection: {}", client.error());
             continue;
         }

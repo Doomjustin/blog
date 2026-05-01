@@ -26,12 +26,18 @@ auto WriteAllAwaiter::await_resume() -> std::expected<resume_type, std::error_co
 
 void WriteAllAwaiter::complete(int result, std::uint32_t flags) noexcept
 {
+    context_.untrack(this);
     set_result(result, flags);
 
-    if (error_code_ != 0 || buffer_.empty())
+    if (is_canceling_ || error_code_ != 0 || buffer_.empty()) {
+        if (is_canceling_ && error_code_ == 0)
+            error_code_ = ECANCELED;
+        
         resume(handle_, result, flags);
-    else
+    }
+    else {
         arm_write();
+    }
 }
 
 void WriteAllAwaiter::arm_write() noexcept
@@ -40,6 +46,8 @@ void WriteAllAwaiter::arm_write() noexcept
 
     ::io_uring_prep_send(sqe, socket_, buffer_.data(), buffer_.size(), 0);
     ::io_uring_sqe_set_data(sqe, this);
+
+    context_.track(this);
 }
 
 void WriteAllAwaiter::set_result(int result, std::uint32_t flags) noexcept

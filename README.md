@@ -12,3 +12,4 @@
 - [08_写路径优化_Scatter-Gather与writev](docs/08_写路径优化_Scatter-Gather与writev.md)
 - [09_读路径优化_recv_multishot与ReceiveStream](docs/09_读路径优化_recv_multishot与ReceiveStream.md)
 - [10_API重构_让用户不再关心IOContext](docs/10_API重构_让用户不再关心IOContext.md)
+- [11_停止机制补完](docs/11_停止机制补完.md)

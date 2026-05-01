@@ -14,6 +14,7 @@ void SleepAwaiter::await_suspend(std::coroutine_handle<> handle) noexcept
     // count=0: fire purely on time expiry, not on completion count.
     ::io_uring_prep_timeout(sqe, &timeout_, 0, 0);
     ::io_uring_sqe_set_data(sqe, this);
+    context_.track(this);
 }
 
 auto SleepAwaiter::await_resume() noexcept -> std::expected<void, std::error_code>
@@ -28,6 +29,7 @@ auto SleepAwaiter::await_resume() noexcept -> std::expected<void, std::error_cod
 
 void SleepAwaiter::complete(int res, std::uint32_t flags) noexcept
 {
+    context_.untrack(this);
     error_code_ = -res;
     
     if (handle_) {

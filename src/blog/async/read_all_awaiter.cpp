@@ -26,12 +26,19 @@ auto ReadAllAwaiter::await_resume() -> std::expected<resume_type, std::error_cod
 
 void ReadAllAwaiter::complete(int result, std::uint32_t flags) noexcept
 {
+    context().untrack(this);
+
     set_result(result, flags);
 
-    if (error_code_ != 0 || buffer_.empty())
+    if (is_canceling_ || error_code_ != 0 || buffer_.empty()) {
+        if (is_canceling_ && error_code_ == 0)
+            error_code_ = ECANCELED;
+
         resume(handle_, result, flags);
-    else
+    }
+    else {
         arm_read();
+    }
 }
 
 void ReadAllAwaiter::arm_read() noexcept
@@ -40,6 +47,8 @@ void ReadAllAwaiter::arm_read() noexcept
 
     ::io_uring_prep_recv(sqe, socket_, buffer_.data(), buffer_.size(), 0);
     ::io_uring_sqe_set_data(sqe, this);
+ 
+    context().track(this);
 }
 
 void ReadAllAwaiter::set_result(int result, std::uint32_t flags) noexcept

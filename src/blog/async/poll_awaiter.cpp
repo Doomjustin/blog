@@ -15,9 +15,10 @@ auto PollAwaiter::await_suspend(std::coroutine_handle<> handle) -> void
     handle_ = handle;
 
     auto* sqe = context_.sqe();
-
     prepare(sqe);
     ::io_uring_sqe_set_data(sqe, this);
+
+    context().track(this);
 }
 
 auto PollAwaiter::await_resume() -> std::expected<void, std::error_code>
@@ -40,6 +41,7 @@ void PollAwaiter::set_result(int result, [[maybe_unused]] std::uint32_t flags) n
 
 void PollAwaiter::complete(int res, std::uint32_t flags) noexcept
 {
+    context().untrack(this);
     set_result(res, flags);
     
     if (handle_) {
