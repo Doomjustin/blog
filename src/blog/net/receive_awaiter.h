@@ -1,5 +1,5 @@
-#ifndef BLOG_ASYNC_READ_SOME_AWAITER_H
-#define BLOG_ASYNC_READ_SOME_AWAITER_H
+#ifndef BLOG_NET_RECEIVE_AWAITER_H
+#define BLOG_NET_RECEIVE_AWAITER_H
 
 #include <coroutine>
 #include <cstddef>
@@ -9,10 +9,10 @@
 
 #include <liburing.h>
 
-#include "io_context.h"
-#include "operation.h"
+#include "async/io_context.h"
+#include "async/operation.h"
 
-namespace async {
+namespace net {
 
 /**
  * @brief Suspend until a single `recv` completes via io_uring.
@@ -21,9 +21,10 @@ namespace async {
  * number of bytes read, or an error code if the operation fails.
  * A result of 0 indicates the peer closed the connection.
  */
-class ReadSomeAwaiter: public Operation {
+class ReceiveAwaiter: public async::Operation {
 public:
     using resume_type = std::size_t;
+    using context_type = async::IOContext;
 
     /**
      * @brief Construct with target fd and destination buffer.
@@ -33,9 +34,9 @@ public:
      * @param buffer  Writable byte span that receives data.
      * @pre `buffer` must remain valid until the coroutine is resumed.
      */
-    ReadSomeAwaiter(IOContext& context, int fd, std::span<std::byte> buffer);
+    ReceiveAwaiter(context_type& context, int fd, std::span<std::byte> buffer);
 
-    ~ReadSomeAwaiter() = default;
+    ~ReceiveAwaiter() = default;
 
     [[nodiscard]]
     auto await_ready() const noexcept -> bool
@@ -53,10 +54,10 @@ public:
 
     void complete(int result, std::uint32_t flags) noexcept override;
 
-    auto context() noexcept -> IOContext& { return context_; }
+    auto context() noexcept -> context_type& { return context_; }
 
 private:
-    IOContext& context_;
+    context_type& context_;
     int fd_;
     std::span<std::byte> buffer_;
 
@@ -65,6 +66,6 @@ private:
     int error_code_{ 0 };
 };
 
-} // namespace async
+} // namespace net
 
-#endif // BLOG_ASYNC_READ_SOME_AWAITER_H
+#endif // BLOG_NET_RECEIVE_AWAITER_H

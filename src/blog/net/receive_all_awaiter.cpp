@@ -1,8 +1,8 @@
-#include "read_all_awaiter.h"
+#include "receive_all_awaiter.h"
 
 #include "common/exceptions.h"
 
-namespace async {
+namespace net {
 
 ReadAllAwaiter::ReadAllAwaiter(context_type& context, int socket, std::span<std::byte> buffer)
     : context_{ context },
@@ -65,4 +65,4 @@ void ReadAllAwaiter::set_result(int result, std::uint32_t flags) noexcept
     }
 }
 
-} // namespace async
+} // namespace net

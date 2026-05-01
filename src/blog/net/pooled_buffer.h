@@ -1,13 +1,13 @@
-#ifndef BLOG_ASYNC_POOLED_BUFFER_H
-#define BLOG_ASYNC_POOLED_BUFFER_H
+#ifndef BLOG_NET_POOLED_BUFFER_H
+#define BLOG_NET_POOLED_BUFFER_H
 
 #include <limits>
 #include <span>
 #include <utility>
 
-#include "io_context.h"
+#include "async/io_context.h"
 
-namespace async {
+namespace net {
 
 /**
  * @brief RAII handle for a buffer slice borrowed from a registered io_uring buffer ring.
@@ -24,9 +24,11 @@ namespace async {
  */
 class PooledBuffer {
 public:
+    using context_type = async::IOContext;
+
     PooledBuffer() = default;
 
-    PooledBuffer(IOContext& context, unsigned bgid, unsigned bid, std::span<std::byte> buffer)
+    PooledBuffer(context_type& context, unsigned bgid, unsigned bid, std::span<std::byte> buffer)
       : context_{ &context }, 
         bgid_{ bgid }, 
         bid_{ bid }, 
@@ -90,7 +92,7 @@ private:
     static constexpr unsigned INVALID_BGID = std::numeric_limits<unsigned>::max();
     static constexpr unsigned INVALID_BID = std::numeric_limits<unsigned>::max();
 
-    IOContext* context_{ nullptr };
+    context_type* context_{ nullptr };
     unsigned bgid_{ INVALID_BGID };
     unsigned bid_{ INVALID_BID };
     std::span<std::byte> buffer_;
@@ -108,6 +110,6 @@ private:
     }
 };
 
-} // namespace async
+} // namespace net
 
-#endif // BLOG_ASYNC_POOLED_BUFFER_H
+#endif // BLOG_NET_POOLED_BUFFER_H

@@ -1,5 +1,5 @@
-#ifndef BLOG_ASYNC_WRITE_SOME_AWAITER_H
-#define BLOG_ASYNC_WRITE_SOME_AWAITER_H
+#ifndef BLOG_NET_SEND_AWAITER_H
+#define BLOG_NET_SEND_AWAITER_H
 
 #include <coroutine>
 #include <cstddef>
@@ -9,10 +9,10 @@
 
 #include <liburing.h>
 
-#include "io_context.h"
-#include "operation.h"
+#include "async/io_context.h"
+#include "async/operation.h"
 
-namespace async {
+namespace net {
 
 /**
  * @brief Suspend until a single `send` completes via io_uring.
@@ -20,9 +20,10 @@ namespace async {
  * Submits one `io_uring_prep_send` SQE and resumes the coroutine with the
  * number of bytes sent, or an error code on failure.
  */
-class WriteSomeAwaiter: public Operation {
+class SendAwaiter: public async::Operation {
 public:
     using resume_type = std::size_t;
+    using context_type = async::IOContext;
 
     /**
      * @brief Construct with target fd and source buffer.
@@ -32,9 +33,9 @@ public:
      * @param buffer  Read-only byte span of data to send.
      * @pre `buffer` must remain valid until the coroutine is resumed.
      */
-    WriteSomeAwaiter(IOContext& context, int fd, std::span<const std::byte> buffer);
+    SendAwaiter(context_type& context, int fd, std::span<const std::byte> buffer);
 
-    ~WriteSomeAwaiter() = default;
+    ~SendAwaiter() = default;
 
     [[nodiscard]]
     constexpr auto await_ready() const noexcept -> bool
@@ -52,17 +53,18 @@ public:
 
     void complete(int result, std::uint32_t flags) noexcept override;
 
-    auto context() noexcept -> IOContext& { return context_; }
+    auto context() noexcept -> context_type& { return context_; }
 
 private:
-    std::coroutine_handle<> handle_{ nullptr };
-    IOContext& context_;
+    context_type& context_;
     int fd_;
     std::span<const std::byte> buffer_;
-    std::size_t byte_writted_ = -1;
+
+    std::coroutine_handle<> handle_{ nullptr };
+    std::size_t byte_sent_{ 0 };
     int error_code_ = 0;
 };
 
-} // namespace async
+} // namespace net
 
-#endif // BLOG_ASYNC_WRITE_SOME_AWAITER_H
+#endif // BLOG_NET_SEND_AWAITER_H

@@ -8,6 +8,7 @@
 
 #include <liburing.h>
 
+#include "buffer.h"
 #include "common/operations.h"
 #include "io_context.h"
 #include "operation.h"
@@ -39,7 +40,8 @@ public:
      *      valid until the coroutine resumes.
      */
     WriteSequenceAwaiter(context_type& context, int socket, const Buffer& buffers)
-      : context_(context), socket_(socket)
+      : context_{ context }, 
+        socket_{ socket }
     {
         iov_.reserve(std::ranges::size(buffers));
 
@@ -119,10 +121,10 @@ public:
     auto context() noexcept -> context_type& { return context_; }
 
 private:
-    std::coroutine_handle<> handle_{ nullptr };
     context_type& context_;
     int socket_;
 
+    std::coroutine_handle<> handle_{ nullptr };
     std::vector<::iovec> iov_;
     std::size_t bytes_written_{ 0 };
     int error_code_{ 0 };

@@ -18,7 +18,7 @@ void connect(int socket, const sockaddr* addr, socklen_t addrlen)
         throw_system_error("Failed to connect socket");
 }
 
-auto write_some(int socket, std::span<const std::byte> buffer)
+auto send(int socket, std::span<const std::byte> buffer)
     -> std::expected<std::size_t, std::error_code>
 {
     auto bytes_written = ::send(socket, buffer.data(), buffer.size_bytes(), 0);
@@ -28,7 +28,7 @@ auto write_some(int socket, std::span<const std::byte> buffer)
     return static_cast<std::size_t>(bytes_written);
 }
 
-auto read_some(int socket, std::span<std::byte> buffer)
+auto receive(int socket, std::span<std::byte> buffer)
     -> std::expected<std::size_t, std::error_code>
 {
     auto bytes_read = ::recv(socket, buffer.data(), buffer.size_bytes(), 0);

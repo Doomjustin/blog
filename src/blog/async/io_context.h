@@ -31,7 +31,7 @@ public:
     };
 
     explicit IOContext(unsigned entries = 1024)
-      : scheduler_(entries)
+      : scheduler_{ entries }
     {}
 
     IOContext(const IOContext&) = delete;

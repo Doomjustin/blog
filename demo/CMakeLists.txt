@@ -17,6 +17,11 @@ add_executable(blog.demo demo.cpp)
 target_link_libraries(blog.demo PRIVATE blog::blog)
 target_compile_features(blog.demo PUBLIC cxx_std_23)
 
+add_executable(blog.benchmark2 benchmark2.cpp)
+target_link_libraries(blog.benchmark2 PRIVATE blog::blog)
+target_compile_features(blog.benchmark2 PUBLIC cxx_std_23)
+
+
 add_executable(blog.benchmark_asio benchmark_asio.cpp)
 target_compile_definitions(blog.benchmark_asio 
     PRIVATE

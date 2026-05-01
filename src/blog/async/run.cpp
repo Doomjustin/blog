@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "this_coroutine.h"
+
 namespace async {
 
 namespace detail {
@@ -23,6 +25,11 @@ void erase(IOContext& context)
 auto setup_buffer_ring(unsigned entries, unsigned size) -> unsigned
 {
     return this_coroutine::context().setup_buffer_ring(entries, size);
+}
+
+void setup_entries(unsigned entries)
+{
+    this_coroutine::detail::entries = entries;
 }
 
 void stop()

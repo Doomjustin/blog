@@ -27,7 +27,7 @@ struct Operation {
      * @param res Completion result. Negative values represent negated `errno`.
      * @param flags CQE flags from io_uring.
      */
-    virtual void complete(int res, unsigned flags) = 0;
+    virtual void complete(int res, std::uint32_t flags) = 0;
 };
 
 

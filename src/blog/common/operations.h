@@ -107,7 +107,7 @@ void connect(int socket, const sockaddr* addr, socklen_t addrlen);
  * @param buffer Source bytes.
  * @return Number of bytes written or an error code.
  */
-auto write_some(int socket, std::span<const std::byte> buffer) -> std::expected<std::size_t, std::error_code>;
+auto send(int socket, std::span<const std::byte> buffer) -> std::expected<std::size_t, std::error_code>;
 
 /**
  * @brief Receive up to `buffer.size_bytes()` bytes from a connected socket.
@@ -116,7 +116,7 @@ auto write_some(int socket, std::span<const std::byte> buffer) -> std::expected<
  * @param buffer Destination bytes.
  * @return Number of bytes read (0 means peer shutdown) or an error code.
  */
-auto read_some(int socket, std::span<std::byte> buffer) -> std::expected<std::size_t, std::error_code>;
+auto receive(int socket, std::span<std::byte> buffer) -> std::expected<std::size_t, std::error_code>;
 
 /**
  * @brief Gather-write multiple buffers with `writev(2)`.

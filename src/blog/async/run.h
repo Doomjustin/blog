@@ -57,7 +57,9 @@ void run(std::integral auto thread_count, Awaiter&& awaiter, Args&&... args)
     run(std::forward<Awaiter>(awaiter), std::forward<Args>(args)...);
 }
 
-auto setup_buffer_ring(unsigned entries, unsigned size) -> unsigned;
+auto setup_buffer_ring(unsigned entries, unsigned size = 4096) -> unsigned;
+
+void setup_entries(unsigned entries);
 
 void stop();
 

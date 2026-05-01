@@ -5,13 +5,15 @@
 #include <netinet/tcp.h>
 #include <sys/socket.h>
 
-#include "async/read_some_awaiter.h"
-#include "async/receive_stream.h"
 #include "async/this_coroutine.h"
 #include "async/write_sequence_awaiter.h"
-#include "async/write_some_awaiter.h"
 #include "common/operations.h"
 #include "net/base_socket.h"
+#include "net/receive_awaiter.h"
+#include "net/receive_stream.h"
+#include "net/send_awaiter.h"
+#include "net/send_zc_awaiter.h"
+#include "net/zero_copy.h"
 
 namespace net::ip {
 
@@ -120,10 +122,10 @@ public:
      * @param buffer Destination byte span.
      * @return Bytes read (0 means peer closed), or an error code.
      */
-    auto read_some(std::span<std::byte> buffer) noexcept 
+    auto receive_some(std::span<std::byte> buffer) noexcept 
         -> std::expected<std::size_t, std::error_code>
     {
-        return operations::read_some(this->native_handle(), buffer);
+        return operations::receive(this->native_handle(), buffer);
     }
 
     /**
@@ -132,10 +134,10 @@ public:
      * @param buffer Source byte span.
      * @return Bytes written or an error code.
      */
-    auto write_some(std::span<const std::byte> buffer) noexcept 
+    auto send_some(std::span<const std::byte> buffer) noexcept 
         -> std::expected<std::size_t, std::error_code>
     {
-        return operations::write_some(this->native_handle(), buffer);
+        return operations::send(this->native_handle(), buffer);
     }
 
     /**
@@ -145,7 +147,7 @@ public:
      * @pre `buffer` must outlive the `co_await` expression.
      * @return Bytes read or an error code.
      */
-    auto async_read_some(std::span<std::byte> buffer) noexcept -> async::ReadSomeAwaiter
+    auto async_receive_some(std::span<std::byte> buffer) noexcept -> ReceiveAwaiter
     {
         return { this->context(), this->native_handle(), buffer };
     }
@@ -157,9 +159,14 @@ public:
      * @pre `buffer` must outlive the `co_await` expression.
      * @return Bytes written or an error code.
      */
-    auto async_write_some(std::span<const std::byte> buffer) noexcept -> async::WriteSomeAwaiter
+    auto async_send_some(std::span<const std::byte> buffer) noexcept -> SendAwaiter
     {
         return { this->context(), this->native_handle(), buffer };
+    }
+
+    auto async_send_some(const ZeroCopyT& buffer) noexcept -> SendZCAwaiter
+    {
+        return { this->context(), this->native_handle(), buffer.span };
     }
 
     /**
@@ -174,24 +181,24 @@ public:
      * @return Bytes written or an error code.
      */
     template<sequence_buffer Buffer>
-    auto async_write_some(const Buffer& buffer) noexcept
+    auto async_send_some(const Buffer& buffer) noexcept
         -> async::WriteSequenceAwaiter<Buffer>
     {
         return async::WriteSequenceAwaiter<Buffer>{ this->context(), this->native_handle(), buffer };
     }
 
-    auto receive_stream() -> async::ReceiveStream
+    auto receive_stream() -> ReceiveStream
     {
         auto default_bgid = this->context().default_buffer();
         if (!default_bgid)
             throw std::runtime_error{ "No default buffer ring available for receive stream" }; 
 
-        return async::ReceiveStream{ this->context(), this->native_handle(), *default_bgid };
+        return { this->context(), this->native_handle(), *default_bgid };
     }
 
-    auto receive_stream(unsigned bgid) -> async::ReceiveStream
+    auto receive_stream(unsigned bgid) -> ReceiveStream
     {
-        return async::ReceiveStream{ this->context(), this->native_handle(), bgid };
+        return { this->context(), this->native_handle(), bgid };
     }
 };
 

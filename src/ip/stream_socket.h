@@ -123,7 +123,7 @@ public:
     auto read_some(std::span<std::byte> buffer) noexcept 
         -> std::expected<std::size_t, std::error_code>
     {
-        return operations::read_some(this->native_handle(), buffer);
+        return operations::receive(this->native_handle(), buffer);
     }
 
     /**
@@ -135,7 +135,7 @@ public:
     auto write_some(std::span<const std::byte> buffer) noexcept 
         -> std::expected<std::size_t, std::error_code>
     {
-        return operations::write_some(this->native_handle(), buffer);
+        return operations::send(this->native_handle(), buffer);
     }
 
     /**

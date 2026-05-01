@@ -1,16 +1,16 @@
-#include "read_some_awaiter.h"
+#include "receive_awaiter.h"
 
 #include "common/exceptions.h"
 
-namespace async {
+namespace net {
 
-ReadSomeAwaiter::ReadSomeAwaiter(IOContext& context, int fd, std::span<std::byte> buffer)
+ReceiveAwaiter::ReceiveAwaiter(context_type& context, int fd, std::span<std::byte> buffer)
   : context_{ context }, 
     fd_{ fd }, 
     buffer_{ buffer }
 {}
 
-void ReadSomeAwaiter::await_suspend(std::coroutine_handle<> handle) noexcept
+void ReceiveAwaiter::await_suspend(std::coroutine_handle<> handle) noexcept
 {
     handle_ = handle;
 
@@ -21,7 +21,7 @@ void ReadSomeAwaiter::await_suspend(std::coroutine_handle<> handle) noexcept
     context().track(this);
 }
 
-auto ReadSomeAwaiter::await_resume() noexcept -> std::expected<resume_type, std::error_code>
+auto ReceiveAwaiter::await_resume() noexcept -> std::expected<resume_type, std::error_code>
 {
     if (error_code_ != 0)
         return unexpected_system_error(error_code_);
@@ -29,12 +29,12 @@ auto ReadSomeAwaiter::await_resume() noexcept -> std::expected<resume_type, std:
     return byte_read_;
 }
 
-void ReadSomeAwaiter::prepare(::io_uring_sqe* sqe) noexcept
+void ReceiveAwaiter::prepare(::io_uring_sqe* sqe) noexcept
 {
     ::io_uring_prep_recv(sqe, fd_, buffer_.data(), buffer_.size(), 0);
 }
 
-void ReadSomeAwaiter::set_result(int result, std::uint32_t flags) noexcept
+void ReceiveAwaiter::set_result(int result, std::uint32_t flags) noexcept
 {
     if (result >= 0)
         byte_read_ = static_cast<std::size_t>(result);
@@ -42,7 +42,7 @@ void ReadSomeAwaiter::set_result(int result, std::uint32_t flags) noexcept
         error_code_ = -result;
 }
 
-void ReadSomeAwaiter::complete(int result, std::uint32_t flags) noexcept
+void ReceiveAwaiter::complete(int result, std::uint32_t flags) noexcept
 {
     context().untrack(this);
 
@@ -54,4 +54,4 @@ void ReadSomeAwaiter::complete(int result, std::uint32_t flags) noexcept
     }
 }
 
-} // namespace async
+} // namespace net

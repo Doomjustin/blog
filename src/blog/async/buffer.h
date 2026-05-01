@@ -1,11 +1,11 @@
-#ifndef BLOG_NET_BUFFER_H
-#define BLOG_NET_BUFFER_H
+#ifndef BLOG_ASYNC_BUFFER_H
+#define BLOG_ASYNC_BUFFER_H
 
 #include <cstddef>
 #include <ranges>
 #include <span>
 
-namespace net {
+namespace async {
 /**
  * @brief Create a read-only byte view over a contiguous range.
  *
@@ -52,6 +52,6 @@ auto buffer(T& range) noexcept -> std::span<std::byte>
     return std::as_writable_bytes(std::span{ range });
 }
 
-} // namespace net
+} // namespace async
 
-#endif // BLOG_NET_BUFFER_H
+#endif // BLOG_ASYNC_BUFFER_H

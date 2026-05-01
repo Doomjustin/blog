@@ -1,5 +1,5 @@
-#ifndef BLOG_ASYNC_RECEIVE_STREAM_H
-#define BLOG_ASYNC_RECEIVE_STREAM_H
+#ifndef BLOG_NET_RECEIVE_STREAM_H
+#define BLOG_NET_RECEIVE_STREAM_H
 
 #include <coroutine>
 #include <cstdint>
@@ -10,14 +10,15 @@
 #include <liburing.h>
 #include <liburing/io_uring.h>
 
-#include "io_context.h"
+#include "async/io_context.h"
 #include "pooled_buffer.h"
 
-namespace async {
+namespace net {
 
 class ReceiveStream {
 public:
     using result_type = std::expected<PooledBuffer, std::error_code>;
+    using context_type = async::IOContext;
 
     class NextAwaiter {
     public:
@@ -37,7 +38,7 @@ public:
     };
 
 
-    ReceiveStream(IOContext& context, int fd, unsigned bgid);
+    ReceiveStream(context_type& context, int fd, unsigned bgid);
 
     ReceiveStream(const ReceiveStream&) = delete;
     auto operator=(const ReceiveStream&) -> ReceiveStream& = delete;
@@ -55,7 +56,7 @@ public:
 private:
     class MutishotReceiveOperation;
 
-    IOContext* context_;
+    context_type* context_;
     int fd_;
     unsigned bgid_;
     MutishotReceiveOperation* operation_{ nullptr };
@@ -71,6 +72,6 @@ private:
     void handle_cqe(int result, std::uint32_t flags) noexcept;
 };
 
-} // namespace async
+} // namespace net
 
-#endif // BLOG_ASYNC_RECEIVE_STREAM_H
+#endif // BLOG_NET_RECEIVE_STREAM_H

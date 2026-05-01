@@ -7,6 +7,13 @@ namespace async::this_coroutine {
 
 auto context() -> IOContext&;
 
+
+namespace detail {
+
+static inline unsigned entries = 1024;
+
+} // namespace detail
+
 } // namespace async::this_coroutine
 
 #endif // BLOG_ASYNC_THIS_COROUTINE_H

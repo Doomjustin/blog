@@ -1,5 +1,5 @@
-#ifndef BLOG_ASYNC_READ_ALL_AWAITER_H
-#define BLOG_ASYNC_READ_ALL_AWAITER_H
+#ifndef BLOG_NET_RECEIVE_ALL_AWAITER_H
+#define BLOG_NET_RECEIVE_ALL_AWAITER_H
 
 #include <coroutine>
 #include <cstdint>
@@ -9,10 +9,10 @@
 
 #include <liburing.h>
 
-#include "io_context.h"
-#include "operation.h"
+#include "async/io_context.h"
+#include "async/operation.h"
 
-namespace async {
+namespace net {
     
 /**
  * @brief Suspend until an entire buffer has been filled via io_uring.
@@ -26,10 +26,10 @@ namespace async {
  * `TimeoutCombinator`; the `parent` pointer routes completions through the
  * combinator when a timeout is active.
  */
-class ReadAllAwaiter: public CancelableOperation {
+class ReadAllAwaiter: public async::CancelableOperation {
 public:
     using resume_type = std::size_t;
-    using context_type = IOContext;
+    using context_type = async::IOContext;
 
     ReadAllAwaiter(context_type& context, int socket, std::span<std::byte> buffer);
 
@@ -65,6 +65,6 @@ private:
     void set_result(int result, std::uint32_t flags) noexcept;
 };
 
-} // namespace async
+} // namespace net
 
-#endif // BLOG_ASYNC_READ_ALL_AWAITER_H
+#endif // BLOG_NET_RECEIVE_ALL_AWAITER_H

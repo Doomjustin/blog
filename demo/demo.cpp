@@ -2,15 +2,7 @@
 
 #include <spdlog/spdlog.h>
 
-#include "async/co_spawn.h"
-#include "async/run.h"
-#include "async/signals.h"
-#include "async/task.h"
-#include "async/timeout.h"
-#include "async/write.h"
-#include "common/as_string.h"
-#include "common/log.h"
-#include "net/ip/tcp.h"
+#include <blog.h>
 
 auto session(net::ip::tcp::socket client) -> async::Task<>
 {
@@ -35,7 +27,7 @@ auto session(net::ip::tcp::socket client) -> async::Task<>
         log::info("Data: {}", as_string(received));
 
         using namespace std::literals::chrono_literals;
-        auto write_result = co_await async::timeout(async::write(client, received), 1ms);
+        auto write_result = co_await async::timeout(net::send(client, received), 1ms);
         if (!write_result) {
             if (write_result.error() == std::errc::timed_out)
                 log::warning("Write to client {} timed out", client.native_handle());

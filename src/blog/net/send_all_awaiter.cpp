@@ -1,22 +1,22 @@
-#include "write_all_awaiter.h"
+#include "send_all_awaiter.h"
 
 #include "common/exceptions.h"
 
-namespace async {
+namespace net {
 
-WriteAllAwaiter::WriteAllAwaiter(context_type& context, int socket, std::span<const std::byte> buffer)
+SendAllAwaiter::SendAllAwaiter(context_type& context, int socket, std::span<const std::byte> buffer)
   : context_{ context }, 
     socket_{ socket }, 
     buffer_{ buffer }
 {}
 
-void WriteAllAwaiter::await_suspend(std::coroutine_handle<> handle) noexcept
+void SendAllAwaiter::await_suspend(std::coroutine_handle<> handle) noexcept
 {
     handle_ = handle;
     arm_write();
 }
 
-auto WriteAllAwaiter::await_resume() -> std::expected<resume_type, std::error_code>
+auto SendAllAwaiter::await_resume() -> std::expected<resume_type, std::error_code>
 {
     if (error_code_ != 0)
         return unexpected_system_error(error_code_);
@@ -24,7 +24,7 @@ auto WriteAllAwaiter::await_resume() -> std::expected<resume_type, std::error_co
     return bytes_written_;
 }
 
-void WriteAllAwaiter::complete(int result, std::uint32_t flags) noexcept
+void SendAllAwaiter::complete(int result, std::uint32_t flags) noexcept
 {
     context_.untrack(this);
     set_result(result, flags);
@@ -40,7 +40,7 @@ void WriteAllAwaiter::complete(int result, std::uint32_t flags) noexcept
     }
 }
 
-void WriteAllAwaiter::arm_write() noexcept
+void SendAllAwaiter::arm_write() noexcept
 {
     auto* sqe = context_.sqe();
 
@@ -50,7 +50,7 @@ void WriteAllAwaiter::arm_write() noexcept
     context_.track(this);
 }
 
-void WriteAllAwaiter::set_result(int result, std::uint32_t flags) noexcept
+void SendAllAwaiter::set_result(int result, std::uint32_t flags) noexcept
 {
     if (result > 0) {
         bytes_written_ += static_cast<std::size_t>(result);
@@ -63,4 +63,4 @@ void WriteAllAwaiter::set_result(int result, std::uint32_t flags) noexcept
         error_code_ = -result;
 }
 
-} // namespace async
+} // namespace net

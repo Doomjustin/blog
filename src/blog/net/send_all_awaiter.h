@@ -1,5 +1,5 @@
-#ifndef BLOG_ASYNC_WRITE_ALL_AWAITER_H
-#define BLOG_ASYNC_WRITE_ALL_AWAITER_H
+#ifndef BLOG_NET_SEND_ALL_AWAITER_H
+#define BLOG_NET_SEND_ALL_AWAITER_H
 
 #include <cerrno>
 #include <coroutine>
@@ -12,10 +12,10 @@
 
 #include <liburing.h>
 
-#include "io_context.h"
-#include "operation.h"
+#include "async/io_context.h"
+#include "async/operation.h"
 
-namespace async {
+namespace net {
 
 /**
  * @brief Suspend until an entire buffer has been sent via io_uring.
@@ -29,14 +29,14 @@ namespace async {
  * `TimeoutCombinator`; the `parent` pointer routes completions through the
  * combinator when a timeout is active.
  */
-class WriteAllAwaiter: public CancelableOperation {
+class SendAllAwaiter: public async::CancelableOperation {
 public:
     using resume_type = std::size_t;
-    using context_type = IOContext;
+    using context_type = async::IOContext;
 
-    WriteAllAwaiter(context_type& context, int socket, std::span<const std::byte> buffer);
+    SendAllAwaiter(context_type& context, int socket, std::span<const std::byte> buffer);
 
-    ~WriteAllAwaiter() = default;
+    ~SendAllAwaiter() = default;
 
     [[nodiscard]]
     constexpr auto await_ready() const noexcept -> bool
@@ -53,7 +53,7 @@ public:
     auto context() noexcept -> context_type& { return context_; }
 
 private:
-    IOContext& context_;
+    context_type& context_;
     int socket_;
     std::span<const std::byte> buffer_;
     std::size_t expected_to_write_{ buffer_.size() };
@@ -67,6 +67,6 @@ private:
     void set_result(int result, std::uint32_t flags) noexcept;
 };
 
-} // namespace async
+} // namespace net
 
-#endif // BLOG_ASYNC_WRITE_ALL_AWAITER_H
+#endif // BLOG_NET_SEND_ALL_AWAITER_H

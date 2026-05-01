@@ -102,7 +102,15 @@ IOContext::Scheduler::~Scheduler()
 
 auto IOContext::Scheduler::sqe() -> ::io_uring_sqe*
 {
-    return ::io_uring_get_sqe(&ring_);
+    auto* sqe = ::io_uring_get_sqe(&ring_);
+
+    if (!sqe) {
+        // 没有可用的SQE了，提交当前的请求以腾出空间
+        ::io_uring_submit(&ring_);
+        return ::io_uring_get_sqe(&ring_);
+    }
+
+    return sqe;
 }
 
 void IOContext::Scheduler::schedule()

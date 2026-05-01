@@ -2,16 +2,16 @@
 
 #include <utility>
 
+#include "async/operation.h"
 #include "common/exceptions.h"
-#include "operation.h"
 
-namespace async {
+namespace net {
 
-class ReceiveStream::MutishotReceiveOperation: public Operation {
+class ReceiveStream::MutishotReceiveOperation: public async::Operation {
     friend class ReceiveStream;
 
 public:
-    MutishotReceiveOperation(ReceiveStream* stream, IOContext* context, unsigned bgid)
+    MutishotReceiveOperation(ReceiveStream* stream, ReceiveStream::context_type* context, unsigned bgid)
       : stream_{ stream }, 
         context_{ context }, 
         bgid_{ bgid } 
@@ -22,7 +22,7 @@ public:
         stream_ = nullptr;
     }
 
-    void complete(int res, unsigned flags) override
+    void complete(int res, std::uint32_t flags) override
     {
         const bool has_more = (flags & IORING_CQE_F_MORE) != 0;
 
@@ -65,7 +65,7 @@ public:
 
 private:
     ReceiveStream* stream_;
-    IOContext* context_;
+    context_type* context_;
     unsigned bgid_;
 };
 
@@ -98,7 +98,7 @@ auto ReceiveStream::NextAwaiter::await_resume() -> std::expected<resume_type, st
 }
 
 
-ReceiveStream::ReceiveStream(IOContext& context, int fd, unsigned bgid)
+ReceiveStream::ReceiveStream(context_type& context, int fd, unsigned bgid)
   : context_{ &context }, 
     fd_{ fd }, 
     bgid_{ bgid }
@@ -151,7 +151,7 @@ void ReceiveStream::arm_operation()
     ::io_uring_prep_recv_multishot(sqe, fd_, nullptr, 0, 0);
     sqe->flags |= IOSQE_BUFFER_SELECT;
     sqe->buf_group = bgid_;
-    ::io_uring_sqe_set_data(sqe, static_cast<Operation*>(operation_));
+    ::io_uring_sqe_set_data(sqe, static_cast<async::Operation*>(operation_));
     operation_armed_ = true;
 
     context_->track(operation_);
@@ -204,4 +204,4 @@ void ReceiveStream::handle_cqe(int result, std::uint32_t flags) noexcept
     }
 }
 
-} // namespace async
+} // namespace net

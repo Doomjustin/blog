@@ -89,7 +89,7 @@ private:
 };
 
 
-constexpr auto is_peer_shutdown(std::error_code& ec) -> bool
+constexpr auto should_ignore(std::error_code& ec) -> bool
 {
     return ec == std::errc::connection_reset || 
            ec == std::errc::broken_pipe ||
@@ -105,7 +105,7 @@ auto session(ip::tcp::socket<Context> socket) -> Task<>
     while (true) {
         auto bytes_read = co_await socket.async_read_some(buffer(data));
         if (!bytes_read) {
-            if (!is_peer_shutdown(bytes_read.error()))
+            if (!should_ignore(bytes_read.error()))
                 spdlog::error("Failed to read from client: {}", bytes_read.error().message());
 
             break;
@@ -114,7 +114,7 @@ auto session(ip::tcp::socket<Context> socket) -> Task<>
         auto bytes_written = co_await async_write(socket, buffer(response_ok));
         // auto bytes_written = co_await socket.async_write_some(response_sequence);
         if (!bytes_written) {
-            if (!is_peer_shutdown(bytes_written.error()))
+            if (!should_ignore(bytes_written.error()))
                 spdlog::error("Failed to write to client: {}", bytes_written.error().message());
 
             break;
