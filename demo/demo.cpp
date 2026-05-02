@@ -48,6 +48,10 @@ auto echo() -> async::Task<>
 
     auto acceptor = net::ip::tcp::acceptor{ endpoint, true };
 
+    // 验证下local_endpoint()接口是否能正确返回绑定的地址信息
+    auto server_endpoint = local_endpoint(acceptor);
+    log::info("Acceptor local endpoint: {}", *server_endpoint);
+
     net::ip::tcp::endpoint client_endpoint{};
     while (true) {
         auto client = co_await acceptor.async_accept(client_endpoint);
