@@ -4,6 +4,7 @@
 #include <as_string.h>
 #include <chrono_duration.h>
 #include <exceptions.h>
+#include <fixed_string.h>
 #include <format.h>
 #include <hash.h>
 #include <log.h>
