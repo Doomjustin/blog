@@ -10,6 +10,7 @@
 #include <hash.h>
 #include <log.h>
 #include <lru_cache.h>
+#include <named_type.h>
 #include <overloads.h>
 #include <utility.h>
 
