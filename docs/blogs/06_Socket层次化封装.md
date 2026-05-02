@@ -136,7 +136,49 @@ IOContext context{};
 auto s = socket{ context };
 ```
 
-### 4\. 第二步：构建面向连接的 StreamSocket
+### 3.5 端点查询：CRTP + ADL 的组合拳
+
+fd 有了，自然想知道自己绑在哪个端口、连的是谁——`getsockname` 和 `getpeername` 就是干这个的。
+
+最直觉的做法是给 `BaseSocket` 加两个成员函数。但 `getpeername` 要求 socket 先 `connect()` 过，Acceptor 根本不 `connect()`，放成员函数上就是把一个"调了必然失败"的接口暴露给所有人。况且查询地址和资源管理本来就是两件事，没必要耦合在一起。
+
+我们这里换个思路：把查询逻辑做成自由函数，用 CRTP 注入，让 ADL 负责查找。
+
+```cpp
+template<typename Derived>
+struct QueryLocalEndpoint {
+    friend auto local_endpoint(const Derived& socket) noexcept
+        requires QuerableSocket<Derived>
+    {
+        return operations::query_local_endpoint<typename Derived::endpoint_type>(
+            socket.native_handle());
+    }
+};
+```
+
+`friend` 写在类模板体内，但它是一个自由函数——调用 `local_endpoint(socket)` 时，编译器通过 ADL 在 `socket` 的关联命名空间里找到它。`BaseSocket` 继承这个 CRTP，`StreamSocket`、`DatagramSocket`、`Acceptor` 全部继承 `BaseSocket`，一行代码，全部覆盖。
+
+`QueryRemoteEndpoint` 就不能这样了：
+
+```cpp
+template<typename Protocol>
+class StreamSocket: public BaseSocket<Protocol>,
+                    public QueryRemoteEndpoint<StreamSocket<Protocol>> { ... };
+```
+
+只在有 `connect()` 的子类上单独挂。在 Acceptor 上调用 `remote_endpoint` 编译能过，但运行时必然返回 `ENOTCONN`——不如直接不提供，错误在类型层面就消失了。
+
+```cpp
+// Acceptor：绑定端口 0 后查内核实际分配的端口
+if (auto ep = local_endpoint(acceptor))
+    log::info("Listening on {}", *ep);  // 0.0.0.0:12345
+
+// StreamSocket：connect 后一眼看清两端
+if (auto local = local_endpoint(socket), remote = remote_endpoint(socket); local && remote)
+    log::info("Connected: {} -> {}", *local, *remote);  // 192.168.1.2:54321 -> 1.2.3.4:443
+```
+
+### 4. 第二步：构建面向连接的 StreamSocket
 
 确立了资源管理基线后，我们可以派生出 `StreamSocket`。
 
