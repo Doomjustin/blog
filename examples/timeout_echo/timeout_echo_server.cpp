@@ -93,7 +93,10 @@ int main(int argc, char* argv[])
         return print_usage(argv[0]);
 
     try {
-        auto port = static_cast<std::uint16_t>(std::stoi(argv[1]));
+        auto port_result = numeric_cast<std::uint16_t>(argv[1]);
+        if (!port_result)
+            throw std::system_error(port_result.error(), "invalid port");
+        auto port = *port_result;
 
         async::co_spawn(shutdown_monitor());
         async::run(1, echo_server, port);

@@ -53,7 +53,10 @@ int main(int argc, char* argv[])
 
 	try {
 		auto host = std::string_view{ argv[1] };
-		auto port = static_cast<std::uint16_t>(std::stoi(argv[2]));
+        auto port_result = numeric_cast<std::uint16_t>(argv[2]);
+        if (!port_result)
+            throw std::system_error(port_result.error(), "invalid port");
+        auto port = *port_result;
 		auto message = std::string_view{ argv[3] };
 
 		async::run(1, client, host, port, message);
