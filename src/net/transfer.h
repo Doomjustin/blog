@@ -1,5 +1,5 @@
-#ifndef BLOG_NET_UTILITY_H
-#define BLOG_NET_UTILITY_H
+#ifndef BLOG_NET_TRANSFER_H
+#define BLOG_NET_TRANSFER_H
 
 #include <receive_all_awaiter.h>
 #include <send_all_awaiter.h>
@@ -70,4 +70,4 @@ auto receive(Socket& socket, std::span<std::byte> buffer)
 
 } // namespace net
 
-#endif // BLOG_NET_UTILITY_H
+#endif // BLOG_NET_TRANSFER_H
