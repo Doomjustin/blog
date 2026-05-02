@@ -5,6 +5,8 @@
 #include <netinet/tcp.h>
 #include <sys/socket.h>
 
+#include "write_sequence_awaiter.h"
+
 #include <async.h>
 #include <base_socket.h>
 #include <common.h>
@@ -140,6 +142,23 @@ public:
     }
 
     /**
+     * @brief Scatter-gather send via `writev(2)` (blocking).
+     *
+     * Writes multiple buffer spans in a single syscall without copying
+     * them into a contiguous staging buffer first.
+     *
+     * @tparam Sequence A range type whose elements each model `const_buffer`.
+     * @param sequence Range of buffer views to write in order.
+     * @return Total bytes written or an error code.
+     */
+    template<sequence_buffer Sequence>
+    auto send(const Sequence& sequence) noexcept 
+        -> std::expected<std::size_t, std::error_code>
+    {
+        return operations::writev(this->native_handle(), sequence);
+    }
+
+    /**
      * @brief Suspend until a receive completes via io_uring.
      *
      * @param buffer Destination byte span.
@@ -176,6 +195,23 @@ public:
     auto async_send_some(const ZeroCopyT& buffer) noexcept -> SendZCAwaiter
     {
         return { this->context(), this->native_handle(), buffer.span };
+    }
+
+    /**
+     * @brief Suspend until a scatter-gather write completes via io_uring.
+     *
+     * Issues a single `writev`-style operation over a sequence of buffers,
+     * avoiding multiple round-trips for multi-part messages.
+     *
+     * @tparam Sequence A range type whose elements each model `const_buffer`.
+     * @param sequence Range of buffer views to write in order.
+     * @pre Each element span must outlive the `co_await` expression.
+     * @return `WriteSequenceAwaiter` ready to be `co_await`-ed.
+     */
+    template<sequence_buffer Sequence>
+    auto async_send(const Sequence& sequence) noexcept -> async::WriteSequenceAwaiter<Sequence>
+    {
+        return { this->context(), this->native_handle(), sequence };
     }
 
     /**

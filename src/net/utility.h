@@ -3,6 +3,8 @@
 
 #include <receive_all_awaiter.h>
 #include <send_all_awaiter.h>
+#include <send_all_zc_awaiter.h>
+#include <zero_copy.h>
 
 namespace net {
 
@@ -23,6 +25,25 @@ template<typename Socket>
 auto send(Socket& socket, std::span<const std::byte> view)
 {
     return SendAllAwaiter{ socket.context(), socket.native_handle(), view };
+}
+
+/**
+ * @brief Create a zero-copy send-all awaiter for the given socket.
+ *
+ * Uses `IORING_OP_SEND_ZC` to avoid copying the buffer into the kernel.
+ * Retries until the entire span has been delivered or an error occurs.
+ * The buffer wrapped in `zc` must remain valid until the coroutine resumes.
+ *
+ * @tparam Socket Any socket type exposing `context()` and `native_handle()`.
+ * @param socket Target connected socket.
+ * @param zc     Zero-copy buffer tag wrapping the read-only byte span.
+ * @pre The buffer inside `zc` must remain valid until the coroutine resumes.
+ * @return `SendAllZCAwaiter` ready to be `co_await`-ed.
+ */
+template<typename Socket>
+auto send(Socket& socket, ZeroCopyT zc)
+{
+    return SendAllZCAwaiter{ socket.context(), socket.native_handle(), zc.span };
 }
 
 /**
