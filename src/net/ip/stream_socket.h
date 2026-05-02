@@ -13,6 +13,7 @@
 #include <base_socket.h>
 #include <common.h>
 #include <operations.h>
+#include <query_endpoint.h>
 #include <receive_awaiter.h>
 #include <receive_stream.h>
 #include <send_awaiter.h>
@@ -31,7 +32,8 @@ namespace net::ip {
  * @tparam Protocol Protocol type satisfying `socket_protocol`.
  */
 template<typename Protocol>
-class StreamSocket: public BaseSocket<Protocol> {
+class StreamSocket: public BaseSocket<Protocol>,
+                    public QueryRemoteEndpoint<StreamSocket<Protocol>> {
 public:
     using base_socket_type = BaseSocket<Protocol>;
     using endpoint_type = typename Protocol::endpoint;

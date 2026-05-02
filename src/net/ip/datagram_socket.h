@@ -10,6 +10,7 @@
 #include <base_socket.h>
 #include <common.h>
 #include <operations.h>
+#include <query_endpoint.h>
 #include <receive_awaiter.h>
 #include <send_awaiter.h>
 #include <send_zc_awaiter.h>
@@ -28,7 +29,8 @@ namespace net::ip {
  * @tparam Context  Execution context type (must provide `sqe()`).
  */
 template<socket_protocol Protocol>
-class DatagramSocket: public BaseSocket<Protocol> {
+class DatagramSocket: public BaseSocket<Protocol>,
+                      public QueryRemoteEndpoint<DatagramSocket<Protocol>> {
 public:
     using base_socket_type = BaseSocket<Protocol>;
     using endpoint_type = typename Protocol::endpoint;

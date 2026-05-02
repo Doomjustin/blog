@@ -12,6 +12,7 @@
 #include <linger.h>
 #include <option.h>
 #include <pooled_buffer.h>
+#include <query_endpoint.h>
 #include <receive_all_awaiter.h>
 #include <receive_awaiter.h>
 #include <receive_stream.h>

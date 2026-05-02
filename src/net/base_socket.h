@@ -12,6 +12,7 @@
 #include <common.h>
 #include <linger.h>
 #include <option.h>
+#include <query_endpoint.h>
 
 namespace net {
 
@@ -41,7 +42,7 @@ concept socket_protocol = requires (const T& t)
  * @tparam IOContext Execution context type associated with the socket.
  */
 template<socket_protocol Protocol>
-class BaseSocket {
+class BaseSocket: public QueryLocalEndpoint<BaseSocket<Protocol>> {
 public:
     using context_type = async::IOContext;
     using protocol_type = Protocol;
