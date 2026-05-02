@@ -16,3 +16,14 @@ target_link_libraries(blog_common
     PRIVATE 
         spdlog::spdlog
 )
+
+if (blog_BUILD_TESTS AND BLOG_COMMON_TEST_SOURCE)
+    include(Catch)
+    add_executable(blog.test.common ${BLOG_COMMON_TEST_SOURCE})
+    target_link_libraries(blog.test.common
+        PRIVATE
+            blog::common
+            Catch2::Catch2WithMain
+    )
+    catch_discover_tests(blog.test.common)
+endif()

@@ -12,6 +12,7 @@ auto AddressV4::to_string() const -> std::string
     if (::inet_ntop(AF_INET, &address, buffer.data(), INET_ADDRSTRLEN) == nullptr)
         throw_system_error("Failed to convert IPv4 address to string");
 
+    buffer.resize(std::strlen(buffer.c_str()));
     return buffer;
 }
 
@@ -48,6 +49,7 @@ auto AddressV6::to_string() const -> std::string
     if (::inet_ntop(AF_INET6, &address, buffer.data(), INET6_ADDRSTRLEN) == nullptr)
         throw_system_error("Failed to convert IPv6 address to string");
 
+    buffer.resize(std::strlen(buffer.c_str()));
     return buffer;
 }
 

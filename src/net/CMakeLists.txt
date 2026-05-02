@@ -15,3 +15,14 @@ target_link_libraries(blog_net
         blog::async
         PkgConfig::liburing
 )
+
+if (blog_BUILD_TESTS AND BLOG_NET_TEST_SOURCE)
+    include(Catch)
+    add_executable(blog.test.net ${BLOG_NET_TEST_SOURCE})
+    target_link_libraries(blog.test.net
+        PRIVATE
+            blog::net
+            Catch2::Catch2WithMain
+    )
+    catch_discover_tests(blog.test.net)
+endif()
