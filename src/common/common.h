@@ -9,6 +9,7 @@
 #include <format.h>
 #include <hash.h>
 #include <log.h>
+#include <lru_cache.h>
 #include <overloads.h>
 #include <utility.h>
 
