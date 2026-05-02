@@ -5,7 +5,9 @@
 #include <chrono_duration.h>
 #include <exceptions.h>
 #include <format.h>
+#include <hash.h>
 #include <log.h>
 #include <overloads.h>
+#include <utility.h>
 
 #endif // BLOG_COMMON_H
