@@ -35,7 +35,7 @@ int main()
 }
 ```
 
-### TCP echo server（30 行）
+### TCP echo server
 
 ```cpp
 #include <blog.h>
@@ -44,33 +44,39 @@ auto session(net::ip::tcp::socket client, net::ip::tcp::endpoint peer) -> async:
 {
     auto stream = client.receive_stream();
     while (true) {
-        auto data = co_await stream.next();
-        if (!data || data->data().empty()) co_return;
-        co_await net::send(client, data->data());
+        auto read_result = co_await stream.next();
+        if (!read_result || read_result->data().empty())
+            co_return;
+
+        co_await net::send(client, read_result->data());
     }
 }
 
 auto echo_server(std::uint16_t port) -> async::Task<>
 {
     async::setup_buffer_ring(128, 4096);
-    auto acceptor = net::ip::tcp::acceptor{
-        net::ip::tcp::endpoint{ net::ip::AddressV4::any(), port }, true
-    };
+
+    auto endpoint = net::ip::tcp::endpoint{ net::ip::AddressV4::any(), port };
+    auto acceptor = net::ip::tcp::acceptor{ endpoint, true };
+
     while (true) {
         net::ip::tcp::endpoint peer;
         auto client = co_await acceptor.async_accept(peer);
         if (!client) {
-            if (client.error() == std::errc::operation_canceled) co_return;
+            if (client.error() == std::errc::operation_canceled)
+                co_return;
+            
             continue;
         }
+
         async::co_spawn(session(std::move(*client), peer));
     }
 }
 
 auto shutdown_monitor() -> async::Task<>
 {
-    async::SignalSet sig{ async::signals::interrupt, async::signals::terminate };
-    co_await sig.async_wait();
+    async::SignalSet signals{ async::signals::interrupt, async::signals::terminate };
+    co_await signals.async_wait();
     async::stop();
 }
 
