@@ -25,7 +25,7 @@ constexpr auto use_fnv_1a(const std::string_view value) noexcept -> UseFNV1aHash
 }
 
 [[nodiscard]]
-auto hash(const UseStdHashT value) noexcept -> std::size_t
+inline auto hash(const UseStdHashT value) noexcept -> std::size_t
 {
     using Hasher = std::hash<std::string_view>;
     return Hasher{}(value.value);
