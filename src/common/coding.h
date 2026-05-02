@@ -205,7 +205,9 @@ struct fixed {
     {
         for (std::size_t i = 0; i < sizeof(T); ++i) {
             *iter++ = static_cast<std::byte>(value & 0xFF);
-            value >>= 8;
+
+            if constexpr (sizeof(T) > 1)
+                value >>= 8;
         }
 
         return iter;
