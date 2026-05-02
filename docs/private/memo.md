@@ -24,3 +24,29 @@
 3. **Fixed Buffers (`IORING_OP_PROVIDE_BUFFERS` / `IORING_REGISTER_BUFFERS`)**：避免每次 I/O 都做内存映射。
 
 准备好迎接 `io_uring` 进阶篇的挑战了吗？我们可以随时从 `IORING_OP_SEND_ZC` 的改造开始！
+
+---
+
+## Examples 建议（从简到难）
+
+### Level 1 — 协程基础
+1. `hello_coroutine` — 最小可运行程序：`async::run(task)`，task 里打印一行，理解 `IOContext` 启动/退出。
+2. `sleep` — `co_await async::sleep_for(1s)`，展示协程挂起/恢复，不涉及网络。
+
+### Level 2 — 基础 IO
+3. `tcp_echo_client` — 连接到服务器，发一条消息，读回 echo，断开。展示 `send` / `receive` 基本用法。
+4. `tcp_echo_server` — 单 `acceptor` + `session` 协程，没有超时，逻辑最简。
+
+### Level 3 — 并发与超时
+5. `concurrent_tasks` — `async::co_spawn` 多个协程并发跑，展示协程间无锁并发。
+6. `timeout_echo_server` — 在 echo server 基础上加 `async::timeout`，演示超时处理模式。
+
+### Level 4 — 流式读取
+7. `receive_stream` — 用 `receive_stream` 做流式协议解析，比如按换行分包，展示 `stream.next()` 的迭代模式。
+
+### Level 5 — 高性能路径
+8. `scatter_gather_write` — 用 `write_sequence` / `writev` 发送多段 buffer，对比单次 send。
+9. `zero_copy_send` — 用 `send_zc` / `send_all_zc`，演示 zero-copy 发送及其生命周期约束。
+
+### Level 6 — 完整应用
+10. `chat_server` — 多客户端广播，session 之间共享状态，综合运用前面的机制。
