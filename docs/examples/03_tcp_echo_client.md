@@ -46,7 +46,7 @@ co_await net::receive(socket, async::buffer(response));
 
 `net::receive` 是 **receive-all**：它会在内部循环提交 `recv`，直到 buffer 被填满、出错或对端关闭连接，才让协程恢复。这对于"已知响应长度"的场景（如本示例）非常方便。
 
-如果不知道数据长度，或者需要流式处理，应当使用 `socket.async_receive_some(buffer)` 获取单次到达的数据，或者使用 `receive_stream()` 让库来管理 buffer（参见 [tcp_echo server](tcp_echo_server.md)）。
+如果不知道数据长度，或者需要流式处理，应当使用 `socket.async_receive_some(buffer)` 获取单次到达的数据，或者使用 `receive_stream()` 让库来管理 buffer（参要2 [tcp_echo server](04_tcp_echo_server.md)）。
 
 ## 错误处理
 
@@ -62,4 +62,4 @@ if (!result) {
 
 ## 下一步
 
-客户端只负责发起连接。要让这个 echo 真正跑起来，还需要一个服务端：[tcp_echo server](tcp_echo_server.md)。
+客户端只负责发起连接。要让这个 echo 真正跑起来，还需要一个服务端：[tcp_echo server](04_tcp_echo_server.md)。

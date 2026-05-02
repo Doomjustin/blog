@@ -85,3 +85,7 @@ int main(int argc, char* argv[])
 ```
 
 `shutdown_monitor` 挂起在信号上。收到信号后，它调用 `async::stop()`，事件循环随即取消所有挂起的操作，等全部操作完成后 `async::run` 返回，进程干净退出。
+
+## 下一步
+
+现在我们可以处理单个 session 了。下一步学习如何让多个任务真正并发运行：[concurrent_tasks](05_concurrent_tasks.md)。

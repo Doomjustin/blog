@@ -1,3 +1,8 @@
 add_subdirectory(hello_coroutine)
 add_subdirectory(sleep)
 add_subdirectory(tcp_echo)
+add_subdirectory(concurrent_tasks)
+add_subdirectory(timeout_echo)
+add_subdirectory(line_protocol)
+add_subdirectory(scatter_gather)
+add_subdirectory(zero_copy_send)

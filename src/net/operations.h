@@ -1,5 +1,5 @@
-#ifndef BLOG_COMMON_OPERATIONS_H
-#define BLOG_COMMON_OPERATIONS_H
+#ifndef BLOG_NET_OPERATIONS_H
+#define BLOG_NET_OPERATIONS_H
 
 #include <cerrno>
 #include <cstddef>
@@ -11,7 +11,10 @@
 #include <sys/uio.h>
 #include <unistd.h>
 
-#include <exceptions.h>
+#include <async.h>
+#include <common.h>
+
+namespace net {
 
 /**
  * @brief Constrain endpoint types that can receive address data from kernel.
@@ -39,31 +42,6 @@ concept mutable_endpoint = requires (const T& endpoint)
     { endpoint.data() } -> std::convertible_to<const sockaddr*>;
     { endpoint.size() } -> std::convertible_to<socklen_t>;
 };
-
-/**
- * @brief Constrain types that can be adapted to writable byte spans.
- */
-template <typename T>
-concept mutable_buffer = requires(T& t)
-{
-    { buffer(t) } -> std::same_as<std::span<std::byte>>;
-};
-
-/**
- * @brief Constrain types that can be adapted to read-only byte spans.
- */
-template<typename T>
-concept const_buffer = requires(const T& t)
-{
-    { buffer(t) } -> std::same_as<std::span<const std::byte>>;
-};
-
-/**
- * @brief Constrain ranges whose elements each model `const_buffer`.
- */
-template <typename T>
-concept sequence_buffer = std::ranges::range<T> && const_buffer<std::ranges::range_reference_t<T>>;
-
 
 namespace operations {
 
@@ -128,7 +106,7 @@ auto receive(int socket, std::span<std::byte> buffer) -> std::expected<std::size
  * @param buffers Source buffer sequence.
  * @return Number of bytes written or an error code.
  */
-template<sequence_buffer SequenceBuffer>
+template<async::sequence_buffer SequenceBuffer>
 auto writev(int socket, const SequenceBuffer& buffers) noexcept
     -> std::expected<std::size_t, std::error_code>
 {
@@ -274,4 +252,6 @@ auto query_local_endpoint(int socket) -> std::expected<Endpoint, std::error_code
 
 } // namespace operations
 
-#endif // BLOG_COMMON_OPERATIONS_H 
+} // namespace net
+
+#endif // BLOG_NET_OPERATIONS_H 

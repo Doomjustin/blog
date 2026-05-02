@@ -2,7 +2,7 @@
 
 #include <utility>
 
-namespace operations {
+namespace net::operations {
 
 auto shutdown(int socket, ShutdownHow how) noexcept -> std::expected<void, std::error_code>
 {
@@ -38,4 +38,4 @@ auto receive(int socket, std::span<std::byte> buffer)
     return static_cast<std::size_t>(bytes_read);
 }
 
-} // namespace operations
+} // namespace net::operations

@@ -6,7 +6,6 @@
 #include <exceptions.h>
 #include <format.h>
 #include <log.h>
-#include <operations.h>
 #include <overloads.h>
 
 #endif // BLOG_COMMON_H

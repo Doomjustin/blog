@@ -6,6 +6,7 @@
 #include <span>
 
 namespace async {
+
 /**
  * @brief Create a read-only byte view over a contiguous range.
  *
@@ -51,6 +52,31 @@ auto buffer(T& range) noexcept -> std::span<std::byte>
 {
     return std::as_writable_bytes(std::span{ range });
 }
+
+
+/**
+ * @brief Constrain types that can be adapted to writable byte spans.
+ */
+template <typename T>
+concept mutable_buffer = requires(T& t)
+{
+    { async::buffer(t) } -> std::same_as<std::span<std::byte>>;
+};
+
+/**
+ * @brief Constrain types that can be adapted to read-only byte spans.
+ */
+template<typename T>
+concept const_buffer = requires(const T& t)
+{
+    { async::buffer(t) } -> std::same_as<std::span<const std::byte>>;
+};
+
+/**
+ * @brief Constrain ranges whose elements each model `const_buffer`.
+ */
+template <typename T>
+concept sequence_buffer = std::ranges::range<T> && const_buffer<std::ranges::range_reference_t<T>>;
 
 } // namespace async
 

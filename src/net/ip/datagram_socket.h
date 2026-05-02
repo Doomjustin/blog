@@ -9,6 +9,7 @@
 #include <async.h>
 #include <base_socket.h>
 #include <common.h>
+#include <operations.h>
 #include <receive_awaiter.h>
 #include <send_awaiter.h>
 #include <send_zc_awaiter.h>
@@ -62,7 +63,7 @@ public:
     auto send_to(std::span<const std::byte> buffer, const endpoint_type& destination) noexcept
         -> std::expected<std::size_t, std::error_code>
     {
-        return operations::send_to(this->native_handle(), buffer, destination, 0);
+        return net::operations::send_to(this->native_handle(), buffer, destination, 0);
     }
 
     /**
@@ -75,7 +76,7 @@ public:
     auto receive_from(std::span<std::byte> buffer, endpoint_type& sender) noexcept
         -> std::expected<std::size_t, std::error_code>
     {
-        return operations::receive_from(this->native_handle(), buffer, sender, 0);
+        return net::operations::receive_from(this->native_handle(), buffer, sender, 0);
     }
 
     /**
@@ -89,7 +90,7 @@ public:
      */
     void connect(const endpoint_type& peer)
     {
-        operations::connect(this->native_handle(), peer.data(), peer.size());
+        net::operations::connect(this->native_handle(), peer.data(), peer.size());
     }
 
     /**
@@ -101,7 +102,7 @@ public:
     auto receive_some(std::span<std::byte> buffer) noexcept 
         -> std::expected<std::size_t, std::error_code>
     {
-        return operations::receive(this->native_handle(), buffer);
+        return net::operations::receive(this->native_handle(), buffer);
     }
 
     /**
@@ -113,7 +114,7 @@ public:
     auto send_some(std::span<const std::byte> buffer) noexcept 
         -> std::expected<std::size_t, std::error_code>
     {
-        return operations::send(this->native_handle(), buffer);
+        return net::operations::send(this->native_handle(), buffer);
     }
 
     /**
@@ -126,11 +127,11 @@ public:
      * @param sequence Range of buffer views to write in order.
      * @return Total bytes written or an error code.
      */
-    template<sequence_buffer Sequence>
+    template<async::sequence_buffer Sequence>
     auto send_some(const Sequence& sequence) noexcept 
         -> std::expected<std::size_t, std::error_code>
     {
-        return operations::writev(this->native_handle(), sequence);
+        return net::operations::writev(this->native_handle(), sequence);
     }
 
     /**
@@ -183,7 +184,7 @@ public:
      * @pre Each element span must outlive the `co_await` expression.
      * @return `WriteSequenceAwaiter` ready to be `co_await`-ed.
      */
-    template<sequence_buffer Sequence>
+    template<async::sequence_buffer Sequence>
     auto async_send_some(const Sequence& sequence) noexcept -> async::WriteSequenceAwaiter<Sequence>
     {
         return { this->context(), this->native_handle(), sequence };

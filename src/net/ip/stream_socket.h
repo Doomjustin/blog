@@ -12,6 +12,7 @@
 #include <async.h>
 #include <base_socket.h>
 #include <common.h>
+#include <operations.h>
 #include <receive_awaiter.h>
 #include <receive_stream.h>
 #include <send_awaiter.h>
@@ -38,7 +39,7 @@ public:
     using is_stream_t = std::true_type;
 
     /** @brief Alias for `ShutdownHow`; controls which direction to close. */
-    using how = operations::ShutdownHow;
+    using how = net::operations::ShutdownHow;
 
     /** @brief Enable TCP keepalive probes to detect dead peers. */
     using keep_alive = BooleanOption<SOL_SOCKET, SO_KEEPALIVE>;
@@ -106,7 +107,7 @@ public:
      */
     void connect(const endpoint_type& peer)
     {
-        operations::connect(this->native_handle(), peer.data(), peer.size());
+        net::operations::connect(this->native_handle(), peer.data(), peer.size());
     }
 
     /**
@@ -117,7 +118,7 @@ public:
      */
     auto shutdown(how how) noexcept -> std::expected<void, std::error_code>
     {
-        return operations::shutdown(this->native_handle(), how);
+        return net::operations::shutdown(this->native_handle(), how);
     }
 
     /**
@@ -129,7 +130,7 @@ public:
     auto receive_some(std::span<std::byte> buffer) noexcept 
         -> std::expected<std::size_t, std::error_code>
     {
-        return operations::receive(this->native_handle(), buffer);
+        return net::operations::receive(this->native_handle(), buffer);
     }
 
     /**
@@ -141,7 +142,7 @@ public:
     auto send_some(std::span<const std::byte> buffer) noexcept 
         -> std::expected<std::size_t, std::error_code>
     {
-        return operations::send(this->native_handle(), buffer);
+        return net::operations::send(this->native_handle(), buffer);
     }
 
     /**
@@ -154,11 +155,11 @@ public:
      * @param sequence Range of buffer views to write in order.
      * @return Total bytes written or an error code.
      */
-    template<sequence_buffer Sequence>
+    template<async::sequence_buffer Sequence>
     auto send_some(const Sequence& sequence) noexcept 
         -> std::expected<std::size_t, std::error_code>
     {
-        return operations::writev(this->native_handle(), sequence);
+        return net::operations::writev(this->native_handle(), sequence);
     }
 
     /**
@@ -211,7 +212,7 @@ public:
      * @pre Each element span must outlive the `co_await` expression.
      * @return `WriteSequenceAwaiter` ready to be `co_await`-ed.
      */
-    template<sequence_buffer Sequence>
+    template<async::sequence_buffer Sequence>
     auto async_send_some(const Sequence& sequence) noexcept -> async::WriteSequenceAwaiter<Sequence>
     {
         return { this->context(), this->native_handle(), sequence };
