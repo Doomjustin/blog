@@ -4,9 +4,15 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 
+#include "write_sequence_awaiter.h"
+
 #include <async.h>
 #include <base_socket.h>
 #include <common.h>
+#include <receive_awaiter.h>
+#include <send_awaiter.h>
+#include <send_zc_awaiter.h>
+#include <zero_copy.h>
 
 namespace net::ip {
 
@@ -15,7 +21,7 @@ namespace net::ip {
  *
  * Extends `BaseSocket` with datagram operations: addressed send/receive,
  * optional connection to a default peer, and io_uring-backed
- * async read/write.
+ * async send/receive.
  *
  * @tparam Protocol Protocol type satisfying `socket_protocol`.
  * @tparam Context  Execution context type (must provide `sqe()`).
@@ -75,8 +81,8 @@ public:
     /**
      * @brief Associate socket with a default peer for subsequent send/receive.
      *
-     * After calling this, `read_some`/`write_some` can be used instead of
-     * `receive_from`/`send_to`.
+        * After calling this, `receive_some`/`send_some` can be used instead of
+        * `receive_from`/`send_to`.
      *
      * @param peer Remote endpoint to connect to.
      * @throws std::system_error If `connect(2)` fails.
@@ -95,8 +101,7 @@ public:
     auto receive_some(std::span<std::byte> buffer) noexcept 
         -> std::expected<std::size_t, std::error_code>
     {
-        // return operations::receive_some(this->native_handle(), buffer);
-        // TODO:
+        return operations::receive(this->native_handle(), buffer);
     }
 
     /**
@@ -108,8 +113,80 @@ public:
     auto send_some(std::span<const std::byte> buffer) noexcept 
         -> std::expected<std::size_t, std::error_code>
     {
-        // return operations::send_some(this->native_handle(), buffer);
-        // TODO:
+        return operations::send(this->native_handle(), buffer);
+    }
+
+    /**
+     * @brief Scatter-gather send via `writev(2)` (blocking).
+     *
+     * Writes multiple buffer spans in a single syscall without copying
+     * them into a contiguous staging buffer first.
+     *
+     * @tparam Sequence A range type whose elements each model `const_buffer`.
+     * @param sequence Range of buffer views to write in order.
+     * @return Total bytes written or an error code.
+     */
+    template<sequence_buffer Sequence>
+    auto send_some(const Sequence& sequence) noexcept 
+        -> std::expected<std::size_t, std::error_code>
+    {
+        return operations::writev(this->native_handle(), sequence);
+    }
+
+    /**
+     * @brief Suspend until a receive completes via io_uring.
+     *
+     * @param buffer Destination byte span.
+     * @pre `buffer` must outlive the `co_await` expression.
+     * @return Bytes read or an error code.
+     */
+    auto async_receive_some(std::span<std::byte> buffer) noexcept -> ReceiveAwaiter
+    {
+        return { this->context(), this->native_handle(), buffer };
+    }
+
+    /**
+     * @brief Suspend until a send completes via io_uring.
+     *
+     * @param buffer Source byte span.
+     * @pre `buffer` must outlive the `co_await` expression.
+     * @return Bytes written or an error code.
+     */
+    auto async_send_some(std::span<const std::byte> buffer) noexcept -> SendAwaiter
+    {
+        return { this->context(), this->native_handle(), buffer };
+    }
+
+    /**
+     * @brief Suspend until a zero-copy send completes via io_uring.
+     *
+     * Uses `IORING_OP_SEND_ZC`; the `ZeroCopyT` tag ensures the caller
+     * acknowledges that the buffer must stay valid until the notif CQE.
+     *
+     * @param buffer Zero-copy-tagged source buffer.
+     * @pre Buffer memory must outlive the second (notif) CQE.
+     * @return Bytes sent or an error code.
+     */
+    auto async_send_some(const ZeroCopyT& buffer) noexcept -> SendZCAwaiter
+    {
+        return { this->context(), this->native_handle(), buffer.span };
+    }
+
+    /**
+     * @brief Suspend until a scatter-gather write completes via io_uring.
+     *
+     * Issues a single `writev`-style operation over a sequence of buffers,
+     * avoiding multiple round-trips for multi-part messages.
+     *
+     * @tparam Sequence A range type whose elements each model `const_buffer`.
+     * @param sequence Range of buffer views to write in order.
+     * @pre Each element span must outlive the `co_await` expression.
+     * @return `WriteSequenceAwaiter` ready to be `co_await`-ed.
+     */
+    template<sequence_buffer Sequence>
+    auto async_send_some(const Sequence& sequence) noexcept -> async::WriteSequenceAwaiter<Sequence>
+    {
+        return { this->context(), this->native_handle(), sequence };
     }
 };
 

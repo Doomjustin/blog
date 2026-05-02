@@ -1,6 +1,8 @@
 #ifndef BLOG_NET_IP_STREAM_SOCKET_H
 #define BLOG_NET_IP_STREAM_SOCKET_H
 
+#include <type_traits>
+
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
@@ -33,6 +35,7 @@ public:
     using base_socket_type = BaseSocket<Protocol>;
     using endpoint_type = typename Protocol::endpoint;
     using context_type = typename base_socket_type::context_type;
+    using is_stream_t = std::true_type;
 
     /** @brief Alias for `ShutdownHow`; controls which direction to close. */
     using how = operations::ShutdownHow;

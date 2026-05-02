@@ -8,6 +8,10 @@
 
 namespace net {
 
+template<typename Socket>
+concept stream_socket = requires { typename Socket::is_stream_t; } 
+                     && Socket::is_stream_t::value;
+
 /**
  * @brief Create a send-all awaiter for the given socket and buffer.
  *
@@ -15,13 +19,13 @@ namespace net {
  * sites. The returned awaiter retries `send` until the entire span has
  * been delivered or an error occurs.
  *
- * @tparam Socket Any socket type exposing `context()` and `native_handle()`.
- * @param socket Target connected socket.
+ * @tparam Socket Connected stream socket type.
+ * @param socket Target connected stream socket.
  * @param view   Read-only byte span to send.
  * @pre `view` must remain valid until the coroutine resumes.
  * @return `SendAllAwaiter` ready to be `co_await`-ed.
  */
-template<typename Socket>
+template<stream_socket Socket>
 auto send(Socket& socket, std::span<const std::byte> view)
 {
     return SendAllAwaiter{ socket.context(), socket.native_handle(), view };
@@ -34,13 +38,13 @@ auto send(Socket& socket, std::span<const std::byte> view)
  * Retries until the entire span has been delivered or an error occurs.
  * The buffer wrapped in `zc` must remain valid until the coroutine resumes.
  *
- * @tparam Socket Any socket type exposing `context()` and `native_handle()`.
- * @param socket Target connected socket.
+ * @tparam Socket Connected stream socket type.
+ * @param socket Target connected stream socket.
  * @param zc     Zero-copy buffer tag wrapping the read-only byte span.
  * @pre The buffer inside `zc` must remain valid until the coroutine resumes.
  * @return `SendAllZCAwaiter` ready to be `co_await`-ed.
  */
-template<typename Socket>
+template<stream_socket Socket>
 auto send(Socket& socket, ZeroCopyT zc)
 {
     return SendAllZCAwaiter{ socket.context(), socket.native_handle(), zc.span };
@@ -52,13 +56,13 @@ auto send(Socket& socket, ZeroCopyT zc)
  * Convenience factory that retries `recv` until `buffer` is fully
  * filled or an error occurs.
  *
- * @tparam Socket Any socket type exposing `context()` and `native_handle()`.
- * @param socket Target connected socket.
+ * @tparam Socket Connected stream socket type.
+ * @param socket Target connected stream socket.
  * @param buffer Writable byte span to fill.
  * @pre `buffer` must remain valid until the coroutine resumes.
  * @return `ReceiveAllAwaiter` ready to be `co_await`-ed.
  */
-template<typename Socket>
+template<stream_socket Socket>
 auto receive(Socket& socket, std::span<std::byte> buffer)
 {
     return ReceiveAllAwaiter{ socket.context(), socket.native_handle(), buffer };
