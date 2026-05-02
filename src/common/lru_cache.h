@@ -11,6 +11,32 @@
 
 #include <gsl/gsl>
 
+/**
+ * @brief Fixed-capacity LRU (Least Recently Used) cache backed by PMR allocators.
+ *
+ * Stores up to `capacity` key-value pairs. When a new entry would exceed
+ * capacity, the least recently used entry is evicted. Both `put` and `get`
+ * count as a "use" and promote the accessed entry to the MRU position.
+ *
+ * The backing storage is a `std::pmr::list` (O(1) splice for promotion)
+ * indexed by a `std::pmr::unordered_map` for O(1) lookups. All allocations
+ * go through the supplied `memory_resource`, defaulting to
+ * `std::pmr::get_default_resource()`.
+ *
+ * @tparam Key       Key type. Must be hashable by `KeyHash` and comparable by `KeyEqual`.
+ * @tparam Value     Value type. Must be move-constructible.
+ * @tparam KeyHash   Hash functor; defaults to `std::hash<Key>`.
+ * @tparam KeyEqual  Equality functor; defaults to `std::equal_to<Key>`.
+ *
+ * @pre `capacity > 0`
+ *
+ * Example:
+ * @code
+ * LRUCache<std::string, int, StringHash, std::equal_to<>> cache{ 3 };
+ * cache.put("a", 1);
+ * auto val = cache.get("a");  // std::optional<std::reference_wrapper<int>>
+ * @endcode
+ */
 template<typename Key,
          typename Value, 
          typename KeyHash = std::hash<Key>, 
@@ -25,6 +51,14 @@ public:
     using const_iterator = typename container::const_iterator;
     using cache = std::pmr::unordered_map<Key, iterator, KeyHash, KeyEqual>;
 
+    /**
+     * @brief Constructs the cache with the given capacity and memory resource.
+     *
+     * @param capacity        Maximum number of entries to hold. Must be > 0.
+     * @param memory_resource PMR allocator to use for all internal storage.
+     *
+     * @pre `capacity > 0`
+     */
     explicit LRUCache(size_type capacity, gsl::not_null<resource*> memory_resource = std::pmr::get_default_resource())
       : capacity_{ capacity },
         items_{ memory_resource.get() },
@@ -41,6 +75,16 @@ public:
 
     ~LRUCache() = default;
 
+    /**
+     * @brief Inserts or updates a key-value pair, promoting the entry to MRU.
+     *
+     * If `key` already exists, its value is overwritten and the entry is
+     * moved to the most recently used position. If the cache is full, the
+     * least recently used entry is evicted before insertion.
+     *
+     * @param key   Key to insert or update.
+     * @param value Value to associate with the key.
+     */
     template<typename K, typename V>
     requires std::constructible_from<Key, K>
           && std::constructible_from<Value, V>
@@ -64,6 +108,14 @@ public:
         cache_.emplace(items_.begin()->first, items_.begin());
     }
 
+    /**
+     * @brief Looks up a key and promotes it to the MRU position on hit.
+     *
+     * @param key  Key to look up. Supports heterogeneous lookup if `KeyHash`
+     *             and `KeyEqual` are transparent.
+     * @return A reference wrapper to the value on hit, or an empty optional on miss.
+     *         The reference remains valid until the entry is evicted.
+     */
     template<typename K>
     auto get(const K& key) noexcept -> std::optional<std::reference_wrapper<Value>>
     {
@@ -75,6 +127,7 @@ public:
         return std::ref(it->second->second);
     }
 
+    /** @brief Removes all entries, leaving the cache empty. */
     void clear() noexcept
     {
         items_.clear();
