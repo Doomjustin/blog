@@ -1,3 +1,5 @@
+add_subdirectory(src)
+
 function(add_blog_executable name)
     add_executable(blog.${name} ${name}.cpp)
     target_link_libraries(blog.${name} PRIVATE blog::demo)
