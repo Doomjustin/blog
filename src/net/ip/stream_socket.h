@@ -152,7 +152,7 @@ public:
      * @return Total bytes written or an error code.
      */
     template<sequence_buffer Sequence>
-    auto send(const Sequence& sequence) noexcept 
+    auto send_some(const Sequence& sequence) noexcept 
         -> std::expected<std::size_t, std::error_code>
     {
         return operations::writev(this->native_handle(), sequence);
@@ -209,7 +209,7 @@ public:
      * @return `WriteSequenceAwaiter` ready to be `co_await`-ed.
      */
     template<sequence_buffer Sequence>
-    auto async_send(const Sequence& sequence) noexcept -> async::WriteSequenceAwaiter<Sequence>
+    auto async_send_some(const Sequence& sequence) noexcept -> async::WriteSequenceAwaiter<Sequence>
     {
         return { this->context(), this->native_handle(), sequence };
     }
