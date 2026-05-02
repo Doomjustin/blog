@@ -1,49 +1,63 @@
-在前面的写路径优化里，我们已经把 `writev` 这类“减少 syscall 次数”的手段铺好了。接下来这篇聊另一个方向：**减少数据复制**。
+在前面的写路径优化里，我们已经用 `writev` 这类手段减少了系统调用的次数。接下来这一篇要解决另一个方向的开销：**数据复制**。
 
-目标很直接：发送大块数据时，尽量不把用户态 buffer 再拷进一份内核缓存。
+传统的 `send` 流程里，用户态的数据会先被复制进内核 socket buffer，再由驱动发给网卡。对于大块数据和高频发送，这一次复制本身就是明显的开销。
 
-在 Linux `io_uring` 里，对应能力是 `IORING_OP_SEND_ZC`。
+Linux `io_uring` 的 `IORING_OP_SEND_ZC` 就是为了避免这一步。但要用对它，需要理解它的完成语义——这是大多数人第一次用时最容易出错的地方。
 
 ---
 
-### 1. 普通 send 到底慢在哪
+### 1. 为什么需要零拷贝发送
 
-普通发送路径里，用户态数据通常会先复制到内核 socket buffer，然后再由驱动发给网卡。简化后是这样：
+普通 `send` 的流程：
 
-```text
-user buffer
-  -> copy_to_kernel
-kernel socket buffer
-  -> DMA / driver
-NIC
+```
+用户 buffer
+  ↓ (内核 memcpy)
+kernel socket buffer  
+  ↓ (DMA 或驱动)
+网卡
 ```
 
-`SEND_ZC` 试图省掉第一段复制：内核不再做那次 data copy，而是让发送过程直接引用用户态内存。
+`SEND_ZC` 想跳过中间那一步复制，直接让驱动从用户态内存读取：
 
-收益在大包、持续发送时最明显；小包场景下，省下来的 copy 往往抵不过额外的状态管理开销。
+```
+用户 buffer
+  ↓ (直接 DMA，无 memcpy)
+网卡
+```
 
----
-
-### 2. zero-copy 真正的难点：完成语义不是“一次 CQE 就结束”
-
-`SEND_ZC` 和普通 `send` 最大区别，不在 API 形态，而在 completion model。
-
-它可能产生两类 CQE：
-
-1. **数据发送结果 CQE**：告诉你这次 send 的返回值（成功字节数或错误）。
-2. **notification CQE**（`IORING_CQE_F_NOTIF`）：告诉你内核/驱动已经不再引用这块用户 buffer。
-
-换句话说，`co_await` 返回“发送结果”不代表 buffer 可以马上释放。真正安全释放的时点，是 notification 到来之后。
-
-这就是 zero-copy 最容易踩坑的地方。
+代价呢？驱动访问内存的时间变长了，所以在这期间，**用户态不能释放或改写这块 buffer**。
 
 ---
 
-### 3. 我在接口层怎么把这个约束显式化
+### 2. 两个 CQE：数据结果 vs 内存释放通知
 
-如果 zero-copy 和普通发送共用同一个参数类型，调用方很容易忘掉生命周期约束。
+`SEND_ZC` 的完成模式跟普通 `send` 不一样。它会回两个 CQE：
 
-所以我这里引入了一个 tag type：`ZeroCopyT`。
+**第一个 CQE**（不带 `IORING_CQE_F_NOTIF`，带 `IORING_CQE_F_MORE`）
+- 内核告诉你这次 `send` 的结果：成功了多少字节或者失败原因
+- 但驱动仍在使用你的 buffer
+- 协程此时**不会**恢复
+
+**第二个 CQE**（带 `IORING_CQE_F_NOTIF`，不带 `IORING_CQE_F_MORE`）
+- 内核通知：我已经用完你的这块 buffer，可以释放了
+- 协程**在这一刻**恢复执行
+- `await_resume()` 返回第一个 CQE 里已经存好的发送结果
+
+所以从协程的角度，返回 = notification 已到 = 内核已停止引用你的 buffer。buffer 完全可以释放或改写。
+
+---
+
+### 3. 用 tag type 在 API 层标记零拷贝意图
+
+如果 `async_send_some` 直接接收普通 buffer 加一个 bool 标志，很容易在调用点看不出端倪：
+
+```cpp
+// 危险写法：一眼看不出 buffer 需要特殊处理
+co_await socket.async_send_some(payload, true);
+```
+
+更好的做法是引入一个 tag type，强制显式说明：
 
 ```cpp
 struct ZeroCopyT {
@@ -55,33 +69,31 @@ auto zero_copy(const T& range) -> ZeroCopyT
 {
     return { std::as_bytes(std::span{ range }) };
 }
+
+// 调用时意图清晰
+co_await socket.async_send_some(net::zero_copy(payload));
 ```
 
-调用者必须显式写 `zero_copy(buffer)`，这相当于把“我知道这块内存要多活一会儿”写进调用点。
+这样做的好处：
 
-这个小小的类型分流，比文档注释更可靠。
+1. **类型强制约束**：传错类型编译就过不了。
+2. **调用点意图清晰**：看到 `zero_copy(...)` 立刻知道这块 buffer 要特殊对待。
+3. **完成语义差异明确**：零拷贝和普通发送的完成流程完全不同，标签清楚地区分了两条路。
 
 ---
 
-### 4. Awaiter 的状态机：只在正确时机结束
+### 4. Awaiter 的状态机：按 CQE flags 区分两阶段
 
-对应 awaiter 是 `SendZCAwaiter`。提交时走 `io_uring_prep_send_zc`：
-
-```cpp
-void SendZCAwaiter::prepare(::io_uring_sqe* sqe) noexcept
-{
-    ::io_uring_prep_send_zc(sqe, fd_, buffer_.data(), buffer_.size(), 0, 0);
-}
-```
-
-完成路径核心逻辑是按 flags 区分 CQE 语义：
+对应 `SendZCAwaiter` 的核心就是这个 `complete()` 方法，按照 flags 区分 CQE 的含义：
 
 ```cpp
 void SendZCAwaiter::complete(int result, std::uint32_t flags) noexcept
 {
+    // 不带 NOTIF：这是数据发送结果 CQE，保存结果
     if (!(flags & IORING_CQE_F_NOTIF))
         set_result(result, flags);
 
+    // 不带 MORE：标志最后一个 CQE，结束整个操作
     if (!(flags & IORING_CQE_F_MORE)) {
         context().untrack(this);
         if (handle_)
@@ -92,39 +104,61 @@ void SendZCAwaiter::complete(int result, std::uint32_t flags) noexcept
 
 这里的关键点：
 
-- 带 `IORING_CQE_F_NOTIF` 的 CQE 不更新发送字节数，它只是“buffer 可以回收”的通知。
-- 只有不再带 `IORING_CQE_F_MORE` 时，整个 operation 才真正 complete。
+- 第一个 CQE（不带 NOTIF，带 MORE）：存下发送字节数或错误码，不恢复协程
+- 第二个 CQE（带 NOTIF，不带 MORE）：跳过结果保存（已有了），恢复协程
 
-也就是说，awaiter 的结束条件不是“收到了某个 CQE”，而是“收到了最后一个 CQE”。
+时序是这样的：
 
----
-
-### 5. 为什么返回值设计成 `expected<size_t, error_code>`
-
-`await_resume()` 返回：
-
-```cpp
-auto await_resume() noexcept -> std::expected<std::size_t, std::error_code>
+```
+User coroutine              SendZCAwaiter              io_uring kernel
+     |                            |                            |
+     | co_await async_send_some   |                            |
+     | (net::zero_copy(buf))      |                            |
+     |------------------------->  |                            |
+     |                   await_suspend()                       |
+     |                    - prepare SQE                        |
+     |                    - track(this)                        |
+     |                            | submit & wait              |
+     |                            |--------------------------> |
+     |  🔄 (suspended)            |                            |
+     |                            |                   1st CQE: send result
+     |                            | complete(...)              |
+     |                 !(NOTIF)✓  | set_result(bytes sent)     |
+     |                 (MORE)✓    | (don't resume yet)         |
+     |                            |                            |
+     |                            |            2nd CQE: notification
+     |                            | complete(...)              |
+     |                 !(NOTIF)✗  | (skip set_result)          |
+     |                 (MORE)✗    | untrack(this)              |
+     |                            | handle_.resume()           |
+     | 🔄 (awoken)                |                            |
+     | auto result =              |                            |
+     | await_resume()             |                            |
+     | (return byte_sent_)        |                            |
+     | <-- proceed                |                            |
 ```
 
-这和普通发送保持一致，业务层不需要为 zero-copy 写另一套错误处理分支。差异被封装在 awaiter 内部状态机。
-
-这也是这一层封装想达成的目标：
-
-- **语义更强**（需要显式 `zero_copy()`）
-- **调用更稳**（返回类型与普通发送一致）
+两个 CQE 都到了，buffer 安全可释放，协程才真正恢复。
 
 ---
 
-### 6. 使用时的边界条件
+### 5. 实战边界条件
 
-实践里有三条必须记住：
+虽然协程返回时 notification 已到，但从工程实践角度有几点值得注意：
 
-1. `zero_copy()` 传入的底层内存必须在 notification CQE 到来前一直有效。
-2. 小消息、高频短连接场景下，zero-copy 不一定比普通 send 更快。
-3. 发生错误时也要等 completion 走完整，不要抢先回收 buffer。
+1. **Buffer 生命周期的本质约束**  
+   本质上只需要保证 buffer 在协程返回前保持有效。由于协程返回 = notification 已到，这个条件在实际代码中很容易满足。对于栈上的 `std::string`、`std::vector` 或其他作用域内存，这不成问题。只有当 buffer 是通过 `new` 分配且在其他线程被 `delete` 时，才会违反这个约束——但这种情况通常表明应用层本身的内存管理有问题。
 
-示例调用形态：
+2. **内存被占用的时间，比想象中还要长（TCP ACK 陷阱）**  
+   第 1 节提到"驱动访问内存的时间变长了"，乍一看像是微秒级的 DMA 操作。但在真实场景中，这个"变长"往往不是驱动的事儿，而是**毫秒到秒级的网络 RTT**。很多网卡驱动和协议栈实现中，内核必须等到对端返回 TCP ACK 确认包，确认数据不需要重传了，才会吐出带 `NOTIF` 的第二个 CQE。这意味着 `SEND_ZC` 的 notification 延迟直接和恶劣的物理网络环境强绑定：丢包、重传、网络拥塞都会拉长等待时间。在一个跨洲际链路上发送，notification 可能要等好几秒，期间内存始终被内核占用。这对内存规划和资源隔离的影响不可忽视。
+
+3. **大文件的"内存锁定"爆炸（RLIMIT_MEMLOCK）**  
+   虽然大文件（MB 级）发送时零拷贝有明显优势，但绝对**不能一次性把几个 GB 的大文件全都梭哈给 `SEND_ZC`**。原因是：内核在等待 notification 期间，会把这块物理内存 Pin 住（锁定，防止被 Swap）。如果瞬间提交过大内存，极易触发操作系统的 `RLIMIT_MEMLOCK` 限制导致直接报错，或者把物理内存撑爆。工业界的正确做法是**分片（Chunking）**：用一个 `while` 循环，每次 `co_await socket.async_send_some(net::zero_copy(chunk))` 发送几 MB，等这几 MB 的 notification 回来（协程唤醒）后，再发下一块。这样既能享受零拷贝的收益，又能保持内存占用在可控范围内。
+
+4. **错误也要等 notification**  
+   即使第一个 CQE 返回错误，completion 流程也要走完（等 notification）。不要假设出错时内核会跳过 notification。
+
+示例调用（小消息场景）：
 
 ```cpp
 std::string payload = "Zero-copy message from io_uring SEND_ZC\n";
@@ -133,20 +167,41 @@ if (!result) {
     log::error("send_zc failed: {}", result.error());
     co_return;
 }
+// 作用域结束时 payload 自动销毁，此时已安全
+```
+
+大文件分片示例：
+
+```cpp
+std::ifstream file("large_file.bin", std::ios::binary);
+const size_t chunk_size = 1024 * 1024;  // 1 MB
+std::vector<char> buffer(chunk_size);
+
+while (file.read(buffer.data(), chunk_size)) {
+    size_t bytes_read = file.gcount();
+    auto result = co_await socket.async_send_some(
+        net::zero_copy(std::span(buffer.data(), bytes_read))
+    );
+    if (!result) {
+        log::error("send chunk failed: {}", result.error());
+        break;
+    }
+    // notification 回来，内存可重用于下一块
+}
 ```
 
 ---
 
-### 7. 小结
+### 6. 小结
 
-`SEND_ZC` 带来的不是“一个更快的 send 函数”，而是一套不同的生命周期契约：
+`SEND_ZC` 的核心是一个**两阶段完成模型**：
 
-- 数据什么时候算“发送成功”
-- buffer 什么时候算“可以释放”
+1. 第一个 CQE：发送是否成功、发了多少字节
+2. 第二个 CQE：内核通知"我用完你的 buffer 了"
 
-把这两个时刻混为一谈，zero-copy 基本就会出错。
+协程在第二个 CQE 到来时才恢复，这样调用方既得到了发送结果，也确切知道何时可以释放 buffer。
 
-用 `ZeroCopyT` 在 API 层做显式分流，用 `SendZCAwaiter` 在 completion 层处理双阶段 CQE，这两层配合起来，才是可用的 zero-copy 封装。
+在 API 层用 `ZeroCopyT` tag type 强制显式选择零拷贝，在 awaiter 层按 CQE flags 正确分发两阶段完成，这两层结合才是鲁棒的设计——既不会因为侥幸巧合而偶然正确，也能清晰表达意图。
 
 [示例代码](../../examples/zero_copy_send/main.cpp)  
 [核心实现](../../src/net/send_zc_awaiter.cpp)  
