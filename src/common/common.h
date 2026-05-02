@@ -13,6 +13,7 @@
 #include <named_type.h>
 #include <overloads.h>
 #include <random.h>
+#include <tracking_resource.h>
 #include <utility.h>
 
 #endif // BLOG_COMMON_H
