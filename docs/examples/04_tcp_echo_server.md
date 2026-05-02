@@ -15,6 +15,17 @@ $ example.tcp_echo.server 12345
 [info] Shutting down...
 ```
 
+## 查询监听地址
+
+`acceptor` bind 之后，可以用 `local_endpoint` 查询实际绑定的地址——这在端口号由命令行传入或绑定到 `0`（让内核分配）时特别有用：
+
+```cpp
+auto ep = local_endpoint(acceptor);
+if (ep) log::info("Listening on {}", *ep);
+```
+
+`local_endpoint` 对所有 socket 类型均有效，包括 acceptor。绑定到端口 `0` 时，内核会自动分配一个可用端口，然后通过 `local_endpoint` 即可拿到实际分配的端口号。
+
 ## 第一部分：接受连接
 
 服务端的核心是一个 acceptor 循环。`async_accept` 挂起协程，直到有新连接到来，并把对端地址写入 `peer`：

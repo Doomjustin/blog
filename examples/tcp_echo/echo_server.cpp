@@ -42,7 +42,8 @@ auto echo_server(std::uint16_t port) -> async::Task<>
     auto endpoint = net::ip::tcp::endpoint{ net::ip::AddressV4::any(), port };
     auto acceptor = net::ip::tcp::acceptor{ endpoint, true };
 
-    log::info("Listening on port {}", port);
+    if (auto ep = local_endpoint(acceptor))
+        log::info("Listening on {}", *ep);
 
     while (true) {
         net::ip::tcp::endpoint peer;

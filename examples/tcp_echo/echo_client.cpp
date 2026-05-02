@@ -14,7 +14,8 @@ auto client(std::string_view host, std::uint16_t port, std::string_view message)
 	auto socket = net::ip::tcp::socket{ endpoint.protocol() };
 	socket.connect(endpoint);
 
-	log::info("Connected to {}", endpoint);
+	if (auto local = local_endpoint(socket), remote = remote_endpoint(socket); local && remote)
+		log::info("Connected: {} -> {}", *local, *remote);
 
 	auto write_result = co_await net::send(socket, async::buffer(message));
 	if (!write_result) {

@@ -27,6 +27,17 @@ socket.connect(endpoint);
 
 `endpoint::from_string` 同时接受 IPv4（`"127.0.0.1"`）和 IPv6（`"::1"`）地址。
 
+`connect` 成功后，可以用 `local_endpoint` / `remote_endpoint` 分别查询内核分配的本地端口和已关联的对端地址：
+
+```cpp
+socket.connect(endpoint);
+
+if (auto local = local_endpoint(socket), remote = remote_endpoint(socket); local && remote)
+    log::info("Connected: {} -> {}", *local, *remote);
+```
+
+`remote_endpoint` 在 socket 调用 `connect()` 之前不可用（会返回 `ENOTCONN`）。
+
 ## 发送数据
 
 发送前，需要把数据包装成 `async::buffer`——它持有一段连续内存的视图，不发生拷贝：
