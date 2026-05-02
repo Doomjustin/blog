@@ -138,7 +138,7 @@ auto async_accept(endpoint_type& endpoint) noexcept -> AcceptAwaiter<Protocol, C
 }
 ```
 
-[完整代码](https://github.com/Doomjustin/blog/blob/main/src/acceptor.h)
+[完整代码](https://github.com/Doomjustin/blog/blob/main/src/net/acceptor.h)
 
 ### 5. 全异步 Echo Server 实战
 

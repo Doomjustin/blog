@@ -329,4 +329,4 @@ client.read_some(buffer(recv_buf))
 
 在下一篇文章中，我们将补齐拼图的最后一块：`Acceptor`（被动接收器）的封装。届时，便可利用这套基础设施，跑通完整的基于 `io_uring` 的全异步协程服务器。
 
-[完整代码](../src/ip/stream_socket.h)
+[完整代码](../../src/net/ip/stream_socket.h)
