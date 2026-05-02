@@ -3,6 +3,7 @@
 
 #include <as_string.h>
 #include <chrono_duration.h>
+#include <coding.h>
 #include <exceptions.h>
 #include <fixed_string.h>
 #include <format.h>
