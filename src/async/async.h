@@ -9,6 +9,7 @@
 #include <io_context.h>
 #include <operation.h>
 #include <poll_awaiter.h>
+#include <read_awaiter.h>
 #include <run.h>
 #include <signals.h>
 #include <sleep_awaiter.h>
@@ -17,6 +18,7 @@
 #include <this_coroutine.h>
 #include <timeout.h>
 #include <timeout_awaiter.h>
+#include <write_awaiter.h>
 #include <write_sequence_awaiter.h>
 
 #endif // BLOG_ASYNC_H
