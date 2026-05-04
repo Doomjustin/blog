@@ -43,7 +43,7 @@ public:
         return false;
     }
 
-    void await_suspend(std::coroutine_handle<> handle) noexcept;
+    auto await_suspend(std::coroutine_handle<> handle) noexcept -> bool;
 
     auto await_resume() noexcept -> std::expected<resume_type, std::error_code>;
 

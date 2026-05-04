@@ -74,14 +74,21 @@ auto ReceiveStream::NextAwaiter::await_ready() const noexcept -> bool
     return !stream_.ready_results_.empty();
 }
 
-void ReceiveStream::NextAwaiter::await_suspend(std::coroutine_handle<> handle) noexcept
+auto ReceiveStream::NextAwaiter::await_suspend(std::coroutine_handle<> handle) noexcept -> bool
 {
     stream_.handle_ = handle;
 
     // 如果当前没有正在进行的操作，就立刻提交一个新的recv_multishot；
     // 如果有了，说明它完成后会resume这个协程，我们就不需要再提交了
-    if (!stream_.operation_armed_)
-        stream_.arm_operation();
+    if (!stream_.operation_armed_) {
+        if (!stream_.arm_operation()) {
+            stream_.ready_results_.emplace_back(
+                unexpected_system_error(EAGAIN));
+            return false;
+        }
+    }
+
+    return true;
 }
 
 auto ReceiveStream::NextAwaiter::await_resume() -> std::expected<resume_type, std::error_code>
@@ -142,19 +149,26 @@ ReceiveStream::~ReceiveStream()
     destroy();
 }
 
-void ReceiveStream::arm_operation()
+auto ReceiveStream::arm_operation() -> bool
 {
     if (!operation_)
         operation_ = new MutishotReceiveOperation{ this, context_, bgid_ };
 
-    auto* sqe = context_->sqe();
-    ::io_uring_prep_recv_multishot(sqe, fd_, nullptr, 0, 0);
-    sqe->flags |= IOSQE_BUFFER_SELECT;
-    sqe->buf_group = bgid_;
-    ::io_uring_sqe_set_data(sqe, static_cast<async::Operation*>(operation_));
-    operation_armed_ = true;
+    if (auto* sqe = context_->sqe()) {
+        ::io_uring_prep_recv_multishot(sqe, fd_, nullptr, 0, 0);
+        sqe->flags |= IOSQE_BUFFER_SELECT;
+        sqe->buf_group = bgid_;
+        ::io_uring_sqe_set_data(sqe, static_cast<async::Operation*>(operation_));
+        operation_armed_ = true;
 
-    context_->track(operation_);
+        context_->track(operation_);
+        return true;
+    }
+
+    // SQ 已满，释放刚分配的 operation（若是新建的）
+    delete operation_;
+    operation_ = nullptr;
+    return false;
 }
 
 void ReceiveStream::destroy() noexcept

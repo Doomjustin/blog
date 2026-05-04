@@ -10,15 +10,20 @@ ReceiveAwaiter::ReceiveAwaiter(context_type& context, int fd, std::span<std::byt
     buffer_{ buffer }
 {}
 
-void ReceiveAwaiter::await_suspend(std::coroutine_handle<> handle) noexcept
+auto ReceiveAwaiter::await_suspend(std::coroutine_handle<> handle) noexcept -> bool
 {
     handle_ = handle;
 
-    auto* sqe = context_.sqe();
-    prepare(sqe);
-    ::io_uring_sqe_set_data(sqe, this);
-    
-    context().track(this);
+    if (auto* sqe = context_.sqe()) {
+        prepare(sqe);
+        ::io_uring_sqe_set_data(sqe, this);
+
+        context().track(this);
+        return true;
+    }
+
+    error_code_ = EAGAIN;
+    return false;
 }
 
 auto ReceiveAwaiter::await_resume() noexcept -> std::expected<resume_type, std::error_code>

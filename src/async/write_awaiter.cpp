@@ -12,15 +12,20 @@ WriteAwaiter::WriteAwaiter(context_type& context, int fd, std::span<const std::b
     buffer_{ buffer }
 {}
 
-void WriteAwaiter::await_suspend(std::coroutine_handle<> handle) noexcept
+auto WriteAwaiter::await_suspend(std::coroutine_handle<> handle) noexcept -> bool
 {
     handle_ = handle;
 
-    auto* sqe = context_.sqe();
-    prepare(sqe);
-    ::io_uring_sqe_set_data(sqe, this);
+    if (auto* sqe = context_.sqe()) {
+        prepare(sqe);
+        ::io_uring_sqe_set_data(sqe, this);
 
-    context().track(this);
+        context().track(this);
+        return true;
+    }
+
+    error_code_ = EAGAIN;
+    return false;
 }
 
 auto WriteAwaiter::await_resume() noexcept -> std::expected<resume_type, std::error_code>

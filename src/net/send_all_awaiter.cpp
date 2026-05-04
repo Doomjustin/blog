@@ -10,10 +10,10 @@ SendAllAwaiter::SendAllAwaiter(context_type& context, int socket, std::span<cons
     buffer_{ buffer }
 {}
 
-void SendAllAwaiter::await_suspend(std::coroutine_handle<> handle) noexcept
+auto SendAllAwaiter::await_suspend(std::coroutine_handle<> handle) noexcept -> bool
 {
     handle_ = handle;
-    arm_write();
+    return arm_write();
 }
 
 auto SendAllAwaiter::await_resume() -> std::expected<resume_type, std::error_code>
@@ -35,19 +35,23 @@ void SendAllAwaiter::complete(int result, std::uint32_t flags) noexcept
         
         resume(handle_, result, flags);
     }
-    else {
-        arm_write();
+    else if (!arm_write()) {
+        resume(handle_, 0, 0);
     }
 }
 
-void SendAllAwaiter::arm_write() noexcept
+auto SendAllAwaiter::arm_write() noexcept -> bool
 {
-    auto* sqe = context_.sqe();
+    if (auto* sqe = context_.sqe()) {
+        ::io_uring_prep_send(sqe, socket_, buffer_.data(), buffer_.size(), 0);
+        ::io_uring_sqe_set_data(sqe, this);
 
-    ::io_uring_prep_send(sqe, socket_, buffer_.data(), buffer_.size(), 0);
-    ::io_uring_sqe_set_data(sqe, this);
+        context_.track(this);
+        return true;
+    }
 
-    context_.track(this);
+    error_code_ = EAGAIN;
+    return false;
 }
 
 void SendAllAwaiter::set_result(int result, std::uint32_t flags) noexcept

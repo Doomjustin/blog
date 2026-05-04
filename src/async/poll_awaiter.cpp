@@ -1,5 +1,6 @@
 #include "poll_awaiter.h"
 
+#include <cerrno>
 #include <coroutine>
 #include <utility>
 
@@ -10,15 +11,20 @@
 
 namespace async {
 
-auto PollAwaiter::await_suspend(std::coroutine_handle<> handle) -> void
+auto PollAwaiter::await_suspend(std::coroutine_handle<> handle) noexcept -> bool
 {
     handle_ = handle;
 
-    auto* sqe = context_.sqe();
-    prepare(sqe);
-    ::io_uring_sqe_set_data(sqe, this);
+    if (auto* sqe = context_.sqe()) {
+        prepare(sqe);
+        ::io_uring_sqe_set_data(sqe, this);
 
-    context().track(this);
+        context().track(this);
+        return true;
+    }
+
+    error_code_ = EAGAIN;
+    return false;
 }
 
 auto PollAwaiter::await_resume() -> std::expected<void, std::error_code>

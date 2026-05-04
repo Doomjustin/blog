@@ -47,7 +47,7 @@ public:
 
         [[nodiscard]]
         auto await_ready() const noexcept -> bool;
-        void await_suspend(std::coroutine_handle<> handle) noexcept;
+        auto await_suspend(std::coroutine_handle<> handle) noexcept -> bool;
         auto await_resume() -> std::expected<resume_type, std::error_code>;
 
     private:
@@ -98,7 +98,7 @@ private:
     std::coroutine_handle<> handle_{ nullptr };
     std::deque<result_type> ready_results_;
 
-    void arm_operation();
+    auto arm_operation() -> bool;
 
     void destroy() noexcept;
 

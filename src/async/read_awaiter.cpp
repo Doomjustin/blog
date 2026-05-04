@@ -12,15 +12,20 @@ ReadAwaiter::ReadAwaiter(context_type& context, int fd, std::span<std::byte> buf
     buffer_{ buffer }
 {}
 
-void ReadAwaiter::await_suspend(std::coroutine_handle<> handle) noexcept
+auto ReadAwaiter::await_suspend(std::coroutine_handle<> handle) noexcept -> bool
 {
     handle_ = handle;
 
-    auto* sqe = context_.sqe();
-    prepare(sqe);
-    ::io_uring_sqe_set_data(sqe, this);
+    if (auto* sqe = context_.sqe()) {
+        prepare(sqe);
+        ::io_uring_sqe_set_data(sqe, this);
 
-    context().track(this);
+        context().track(this);
+        return true;
+    }
+
+    error_code_ = EAGAIN;
+    return false;
 }
 
 auto ReadAwaiter::await_resume() noexcept -> std::expected<resume_type, std::error_code>

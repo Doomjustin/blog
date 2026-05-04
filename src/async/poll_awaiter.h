@@ -41,7 +41,7 @@ public:
     [[nodiscard]]
     constexpr auto await_ready() const noexcept -> bool { return false; }
 
-    auto await_suspend(std::coroutine_handle<> handle) -> void;
+    auto await_suspend(std::coroutine_handle<> handle) noexcept -> bool;
 
     auto await_resume() -> std::expected<void, std::error_code>;
 

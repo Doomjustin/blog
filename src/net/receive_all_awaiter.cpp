@@ -10,10 +10,10 @@ ReceiveAllAwaiter::ReceiveAllAwaiter(context_type& context, int socket, std::spa
     buffer_{ buffer }
 {}
 
-void ReceiveAllAwaiter::await_suspend(std::coroutine_handle<> handle) noexcept
+auto ReceiveAllAwaiter::await_suspend(std::coroutine_handle<> handle) noexcept -> bool
 {
     handle_ = handle;
-    arm_read();
+    return arm_read();
 }
 
 auto ReceiveAllAwaiter::await_resume() -> std::expected<resume_type, std::error_code>
@@ -36,19 +36,23 @@ void ReceiveAllAwaiter::complete(int result, std::uint32_t flags) noexcept
 
         resume(handle_, result, flags);
     }
-    else {
-        arm_read();
+    else if (!arm_read()) {
+        resume(handle_, 0, 0);
     }
 }
 
-void ReceiveAllAwaiter::arm_read() noexcept
+auto ReceiveAllAwaiter::arm_read() noexcept -> bool
 {
-    auto* sqe = context_.sqe();
+    if (auto* sqe = context_.sqe()) {
+        ::io_uring_prep_recv(sqe, socket_, buffer_.data(), buffer_.size(), 0);
+        ::io_uring_sqe_set_data(sqe, this);
 
-    ::io_uring_prep_recv(sqe, socket_, buffer_.data(), buffer_.size(), 0);
-    ::io_uring_sqe_set_data(sqe, this);
- 
-    context().track(this);
+        context().track(this);
+        return true;
+    }
+
+    error_code_ = EAGAIN;
+    return false;
 }
 
 void ReceiveAllAwaiter::set_result(int result, std::uint32_t flags) noexcept

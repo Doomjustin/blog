@@ -48,7 +48,7 @@ public:
         return false;
     }
 
-    void await_suspend(std::coroutine_handle<> handle) noexcept;
+    auto await_suspend(std::coroutine_handle<> handle) noexcept -> bool;
 
     auto await_resume() -> std::expected<resume_type, std::error_code>;
 
@@ -67,7 +67,7 @@ private:
     std::size_t bytes_read_{ 0 };
     int error_code_{ 0 };
 
-    void arm_read() noexcept;
+    auto arm_read() noexcept -> bool;
 
     void set_result(int result, std::uint32_t flags) noexcept;
 };
