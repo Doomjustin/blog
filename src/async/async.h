@@ -14,12 +14,12 @@
 #include <run.h>
 #include <signals.h>
 #include <single_operation.h>
-#include <sleep_awaiter.h>
 #include <sleep_for.h>
 #include <task.h>
 #include <this_coroutine.h>
 #include <timeout.h>
-#include <timeout_awaiter.h>
+#include <when_all.h>
+#include <when_any.h>
 #include <write_awaiter.h>
 #include <write_sequence_awaiter.h>
 

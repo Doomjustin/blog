@@ -79,6 +79,25 @@ struct CancelableOperation : public Operation {
     }
 };
 
+/**
+ * @brief Constrain operations that support mid-flight cancellation via a parent combinator.
+ *
+ * A cancelable operation must:
+ * - Expose a `resume_type` result alias.
+ * - Return an lvalue reference from `context()`.
+ * - Accept `await_suspend(handle)` so combinators such as `WhenAnyAwaiter` and
+ *   `WhenAllAwaiter` can drive it.
+ * - Derive from `CancelableOperation` so the `parent` pointer mechanism is available.
+ */
+template<typename T>
+concept cancelable_operation = requires(T& t)
+{
+    typename T::resume_type;
+
+    requires std::is_lvalue_reference_v<decltype(t.context())>;
+    t.await_suspend(std::coroutine_handle<>());
+};
+
 } // namespace async
 
 #endif // BLOG_ASYNC_OPERATION_H

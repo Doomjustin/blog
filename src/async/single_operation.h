@@ -35,6 +35,7 @@ namespace async {
 template<typename Derived, typename ResumeType>
 class SingleOperation: public CancelableOperation {
 public:
+    using is_single_shot = void;
     using resume_type = ResumeType;
     using context_type = IOContext;
 
@@ -124,6 +125,17 @@ protected:
     std::coroutine_handle<> handle_{ nullptr };
     int error_code_{ 0 };
 };
+
+
+/**
+ * @brief Constrain inner operations that can be wrapped with timeout semantics.
+ *
+ * An operation satisfies this concept by exposing `using is_single_shot = void`
+ * inside the class, which is provided automatically by the
+ * `SingleOperation<Derived, ResumeType>` CRTP base.
+ */
+template<typename T>
+concept single_shot_only_operation = requires { typename T::is_single_shot; };
 
 } // namespace async
 

@@ -3,7 +3,6 @@
 
 #include <cerrno>
 #include <chrono>
-#include <concepts>
 #include <coroutine>
 #include <cstdint>
 #include <expected>
@@ -13,28 +12,11 @@
 
 #include <common.h>
 #include <operation.h>
+#include <single_operation.h>
+#include <sleep_for.h>
+#include <when_any.h>
 
 namespace async {
-
-/**
- * @brief Constrain inner operations that can be wrapped with timeout semantics.
- *
- * The operation must expose a `context()`, `prepare()`, `set_result()`, and
- * `await_resume()` interface and derive from `Operation` so `TimeoutAwaiter`
- * can set it as CQE user-data and dispatch completions correctly.
- */
-template<typename T>
-concept single_shot_only_operation = requires (T& op, ::io_uring_sqe* sqe, std::coroutine_handle<> handle)
-{
-    typename T::resume_type;
-
-    requires std::is_lvalue_reference_v<decltype(op.context())>;
-    op.context();
-    op.prepare(sqe);
-    op.set_result(0, 0);
-    { op.await_resume() } -> std::same_as<std::expected<typename T::resume_type, std::error_code>>;
-};
-
 
 /**
  * @brief Wrap an inner io_uring operation with a linked timeout SQE.
@@ -141,160 +123,87 @@ private:
 
 
 /**
- * @brief Constrain operations that support mid-flight cancellation via a parent combinator.
+ * @brief Thin awaiter wrapping `WhenAnyAwaiter<Op, SleepAwaiter>`.
  *
- * A cancelable operation must:
- * - Expose a `resume_type` result alias.
- * - Return an lvalue reference from `context()`.
- * - Accept `await_suspend(handle)` so `TimeoutCombinator` can call it.
- * - Derive from `CancelableOperation` so the `parent` pointer mechanism is available.
+ * Adapts the variant result into a flat `std::expected`:
+ * - index 0 (Op wins)    → forward the inner result.
+ * - index 1 (sleep wins) → return `std::errc::timed_out`.
  */
-template<typename T>
-concept cancelable_operation = requires(T& t)
-{
-    typename T::resume_type;
-
-    requires std::is_lvalue_reference_v<decltype(t.context())>;
-    t.await_suspend(std::coroutine_handle<>());
-};
-
-
-/**
- * @brief Wrap a `CancelableOperation` with an independent timer and mutual cancellation.
- *
- * Unlike `TimeoutAwaiter` (which uses `IOSQE_IO_LINK`), `TimeoutCombinator` submits
- * the inner operation and a separate `io_uring_prep_timeout` SQE independently, then
- * cancels whichever side loses the race:
- * - If the timer fires first (`on_timer_completed`), the inner operation is cancelled
- *   and `await_resume` returns `std::errc::timed_out`.
- * - If the inner operation completes first (`complete`), the timer SQE is cancelled.
- *
- * Both CQEs must arrive before the coroutine is resumed (`pending_cqes_` starts at 2).
- * Cancellation is issued via `IOContext::cancel()`, which does not increment the
- * outstanding-work counter.
- *
- * @tparam Awaiter Cancelable awaiter type satisfying `cancelable_operation`.
- */
-template<cancelable_operation Awaiter>
-class TimeoutCombinator: public CancelableOperation {
+template<cancelable_operation Op>
+class TimeoutWrapper {
 public:
-    using resume_type = typename Awaiter::resume_type;
+    using resume_type = typename Op::resume_type;
 
-    /**
-     * @brief Construct from an inner awaiter and a timeout duration.
-     *
-     * Sets `awaiter_.parent = this` so that when the inner awaiter calls back
-     * into its parent, `TimeoutCombinator` can cancel the pending timer.
-     *
-     * @tparam Duration `std::chrono::duration` specialization.
-     * @param awaiter Inner cancelable awaiter; moved into this combinator.
-     * @param timeout Maximum allowed duration for the inner operation.
-     */
-    template<chrono_duration Duration>
-    TimeoutCombinator(Awaiter&& awaiter, Duration timeout)
-      : awaiter_{ std::forward<Awaiter>(awaiter) }
-    {
-        using namespace std::chrono;
-
-        timeout_.tv_sec = duration_cast<seconds>(timeout).count();
-        timeout_.tv_nsec = duration_cast<nanoseconds>(timeout % 1s).count();
-
-        awaiter_.parent = this;
-    }
-
-    ~TimeoutCombinator() = default;
+    TimeoutWrapper(Op&& op, TimerAwaier sleep)
+      : inner_{ std::move(op), std::move(sleep) }
+    {}
 
     [[nodiscard]]
-    constexpr auto await_ready() const noexcept -> bool
-    {
-        return false;
-    }
+    constexpr auto await_ready() const noexcept -> bool { return false; }
 
     void await_suspend(std::coroutine_handle<> handle) noexcept
     {
-        handle_ = handle;
-
-        auto* sqe = context().sqe();
-        ::io_uring_prep_timeout(sqe, &timeout_, 0, 0);
-        ::io_uring_sqe_set_data(sqe, &timer_);
-
-        context().track(&timer_);
-        awaiter_.await_suspend(handle);
+        inner_.await_suspend(handle);
     }
 
     auto await_resume() -> std::expected<resume_type, std::error_code>
     {
-        if (state_ == State::TimerCompleted)
+        auto result = inner_.await_resume();
+        if (result.index() == 1)
             return unexpected_system_error(std::errc::timed_out);
-
-        return awaiter_.await_resume();
+        return std::get<0>(result);
     }
 
-    void complete(int result, std::uint32_t flags) noexcept override
-    {
-        // 如果内层操作先完成了，取消定时器SQE以避免不必要的超时事件
-        if (state_ == State::Pending) {
-            state_ = State::AwaiterCompleted;
-            context().cancel(&timer_);
-        }
-
-        // 等到两个CQE都完成后才返回结果，避免丢失任何一个的完成事件
-        if (--pending_cqes_ == 0) {
-            auto handle = std::exchange(handle_, nullptr);
-            handle.resume();
-        }
-    }
-
-    auto context() noexcept -> decltype(std::declval<Awaiter&>().context())
-    {
-        return awaiter_.context();
-    }
+    auto context() noexcept -> decltype(auto) { return inner_.context(); }
 
 private:
-    enum State: std::uint8_t {
-        Pending,
-        AwaiterCompleted,
-        TimerCompleted
-    };
-
-    struct Timer: public Operation {
-        TimeoutCombinator* owner;
-
-        Timer(TimeoutCombinator* owner) 
-          : owner{ owner } 
-        {}
-
-        ~Timer() = default;
-
-        void complete(int result, [[maybe_unused]] std::uint32_t flags) noexcept override
-        {
-            owner->context().untrack(this);
-            owner->on_timer_completed(result);
-        }
-    };
-
-    Awaiter awaiter_;
-    struct __kernel_timespec timeout_;
-
-    std::coroutine_handle<> handle_;
-    State state_{ State::Pending };
-    int pending_cqes_{ 2 };
-    Timer timer_{ this };
-
-    void on_timer_completed(int result) noexcept
-    {
-        // 如果定时器先完成了，取消内层操作以避免不必要的处理
-        if (state_ == State::Pending) {
-            state_ = State::TimerCompleted;
-            context().cancel(&awaiter_);
-        }
-
-        if (--pending_cqes_ == 0) {
-            auto handle = std::exchange(handle_, nullptr);
-            handle.resume();
-        }
-    }
+    WhenAnyAwaiter<Op, TimerAwaier> inner_;
 };
+
+/**
+ * @brief Add timeout semantics to one-shot operations without changing call style.
+ *
+ * Uses `IOSQE_IO_LINK` to atomically chain the operation SQE with a
+ * `io_uring_prep_link_timeout` SQE. The `single_shot_only_operation` constraint
+ * provides the `prepare` / `set_result` / `await_resume` interface required by
+ * `TimeoutAwaiter`.
+ *
+ * @tparam Operation One-shot operation type satisfying `single_shot_only_operation`.
+ * @tparam Duration  Duration type satisfying `chrono_duration`.
+ * @param operation  Operation to wrap with timeout behavior.
+ * @param dur        Timeout duration.
+ */
+template<single_shot_only_operation Operation, chrono_duration Duration>
+auto timeout(Operation&& operation, Duration dur)
+{
+    return TimeoutAwaiter<std::decay_t<Operation>>{ std::forward<Operation>(operation), dur };
+}
+
+/**
+ * @brief Add timeout semantics to cancelable operations.
+ *
+ * Races the inner operation against a `SleepAwaiter` of the given duration
+ * using `when_any`. Returns `std::errc::timed_out` if the sleep wins;
+ * otherwise forwards the inner operation's own `std::expected` result.
+ * The loser is cancelled and both CQEs are consumed before resuming.
+ *
+ * @tparam Operation Cancelable operation type satisfying `cancelable_operation`.
+ * @tparam Duration  Duration type satisfying `chrono_duration`.
+ * @param operation  Operation to wrap with timeout behavior.
+ * @param dur        Maximum allowed duration before cancellation.
+ *
+ * @code{.cpp}
+ * auto result = co_await timeout(net::receive_all(ctx, sock, buf), 5s);
+ * if (!result && result.error() == std::errc::timed_out) { ... }
+ * @endcode
+ */
+template<cancelable_operation Operation, chrono_duration Duration>
+    requires (!single_shot_only_operation<Operation>)
+auto timeout(Operation&& operation, Duration dur)
+{
+    auto& ctx = operation.context();
+    return TimeoutWrapper<std::decay_t<Operation>>{ std::forward<Operation>(operation), TimerAwaier{ ctx, dur } };
+}
 
 } // namespace async
 
