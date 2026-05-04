@@ -1,11 +1,8 @@
 #ifndef BLOG_NET_RECEIVE_AWAITER_H
 #define BLOG_NET_RECEIVE_AWAITER_H
 
-#include <coroutine>
 #include <cstddef>
-#include <expected>
 #include <span>
-#include <system_error>
 
 #include <liburing.h>
 
@@ -20,49 +17,35 @@ namespace net {
  * number of bytes read, or an error code if the operation fails.
  * A result of 0 indicates the peer closed the connection.
  */
-class ReceiveAwaiter: public async::Operation {
+class ReceiveAwaiter: public async::SingleOperation<ReceiveAwaiter, std::size_t> {
 public:
-    using resume_type = std::size_t;
-    using context_type = async::IOContext;
-
-    /**
-     * @brief Construct with target fd and destination buffer.
-     *
-     * @param context I/O context that drives this operation.
-     * @param fd      Source socket file descriptor.
-     * @param buffer  Writable byte span that receives data.
-     * @pre `buffer` must remain valid until the coroutine is resumed.
-     */
-    ReceiveAwaiter(context_type& context, int fd, std::span<std::byte> buffer);
+    ReceiveAwaiter(context_type& context, int fd, std::span<std::byte> buffer)
+      : async::SingleOperation<ReceiveAwaiter, std::size_t>{ context },
+        fd_{ fd },
+        buffer_{ buffer }
+    {}
 
     ~ReceiveAwaiter() = default;
 
-    [[nodiscard]]
-    auto await_ready() const noexcept -> bool
+    void prepare(::io_uring_sqe* sqe) noexcept
     {
-        return false;
+        ::io_uring_prep_recv(sqe, fd_, buffer_.data(), buffer_.size(), 0);
     }
 
-    auto await_suspend(std::coroutine_handle<> handle) noexcept -> bool;
+    auto result() noexcept -> std::size_t 
+    { 
+        return bytes_read_; 
+    }
 
-    auto await_resume() noexcept -> std::expected<resume_type, std::error_code>;
-
-    void prepare(::io_uring_sqe* sqe) noexcept;
-
-    void set_result(int result, std::uint32_t flags) noexcept;
-
-    void complete(int result, std::uint32_t flags) noexcept override;
-
-    auto context() noexcept -> context_type& { return context_; }
+    void set_result(int result, std::uint32_t flags) noexcept
+    {
+        bytes_read_ = static_cast<std::size_t>(result);
+    }
 
 private:
-    context_type& context_;
     int fd_;
     std::span<std::byte> buffer_;
-
-    std::coroutine_handle<> handle_{ nullptr };
-    std::size_t byte_read_{ 0 };
-    int error_code_{ 0 };
+    std::size_t bytes_read_{ 0 };
 };
 
 } // namespace net

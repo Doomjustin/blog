@@ -2,15 +2,13 @@
 #define BLOG_ASYNC_SLEEP_AWAITER_H
 
 #include <chrono>
-#include <coroutine>
 #include <expected>
 #include <system_error>
 
 #include <liburing.h>
 
 #include <common.h>
-#include <io_context.h>
-#include <operation.h>
+#include <single_operation.h>
 #include <this_coroutine.h>
 
 namespace async {
@@ -22,7 +20,7 @@ namespace async {
  * once the kernel reports the timer expiry. Typically constructed via
  * the `sleep_for()` factory rather than directly.
  */
-class SleepAwaiter: public Operation {
+class SleepAwaiter: public SingleOperation<SleepAwaiter, void> {
 public:
     /**
      * @brief Construct and convert duration to kernel `__kernel_timespec`.
@@ -32,8 +30,8 @@ public:
      * @param d       Sleep duration.
      */
     template<chrono_duration Duration>
-    SleepAwaiter(IOContext& context, Duration d)
-      : context_{ context }
+    SleepAwaiter(context_type& context, Duration d)
+      : SingleOperation<SleepAwaiter, void>{ context }
     {
         using namespace std::chrono;
         timeout_.tv_sec = duration_cast<seconds>(d).count();
@@ -54,23 +52,28 @@ public:
       : SleepAwaiter{ this_coroutine::context(), d }
     {}
 
-    [[nodiscard]]
-    constexpr auto await_ready() const noexcept -> bool 
-    { 
-        return false; 
+    void prepare(::io_uring_sqe* sqe) noexcept
+    {
+        // count=0: fire purely on time expiry, not on completion count.
+        ::io_uring_prep_timeout(sqe, &timeout_, 0, 0);
     }
 
-    auto await_suspend(std::coroutine_handle<> handle) noexcept -> bool;
+    /**
+     * @brief Return success on both clean expiry (ETIME) and normal completion.
+     *
+     * io_uring signals a clean timeout with `ETIME`; all other non-zero
+     * `error_code_` values (e.g. `ECANCELED`) are forwarded as errors.
+     */
+    auto await_resume() noexcept -> std::expected<void, std::error_code>
+    {
+        if (error_code_ == ETIME || error_code_ == 0)
+            return {};
 
-    auto await_resume() noexcept -> std::expected<void, std::error_code>;
-
-    void complete(int res, std::uint32_t flags) noexcept override;
+        return unexpected_system_error(error_code_);
+    }
 
 private:
-    IOContext& context_;
     struct __kernel_timespec timeout_{};
-    std::coroutine_handle<> handle_{ nullptr };
-    int error_code_{ 0 };
 };
 
 } // namespace async
