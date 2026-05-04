@@ -1,14 +1,11 @@
 #ifndef BLOG_NET_SEND_ALL_ZC_AWAITER_H
 #define BLOG_NET_SEND_ALL_ZC_AWAITER_H
 
-#include <coroutine>
 #include <cstddef>
-#include <cstdint>
-#include <expected>
 #include <span>
-#include <system_error>
 
 #include <liburing.h>
+#include <liburing/io_uring.h>
 
 #include <async.h>
 
@@ -27,14 +24,11 @@ namespace net {
  * The buffer must remain valid until the coroutine resumes (i.e., until
  * the final notif CQE is processed).
  *
- * Derives from `CancelableOperation` so it can be wrapped by
- * `TimeoutCombinator`.
+ * Derives from `LoopOperation` (which derives from `CancelableOperation`)
+ * so it can be wrapped by `TimeoutCombinator`.
  */
-class SendAllZCAwaiter: public async::CancelableOperation {
+class SendAllZCAwaiter: public async::LoopOperation<SendAllZCAwaiter, std::span<const std::byte>> {
 public:
-    using resume_type = std::size_t;
-    using context_type = async::IOContext;
-
     /**
      * @brief Construct with target fd and full source buffer.
      *
@@ -43,36 +37,49 @@ public:
      * @param buffer  Read-only byte span to send in full.
      * @pre `buffer` must remain valid until the coroutine resumes.
      */
-    SendAllZCAwaiter(context_type& context, int socket, std::span<const std::byte> buffer);
+    SendAllZCAwaiter(async::IOContext& context, int socket, std::span<const std::byte> buffer)
+      : async::LoopOperation<SendAllZCAwaiter, std::span<const std::byte>>{ context, buffer }
+      , socket_{ socket }
+    {}
 
     ~SendAllZCAwaiter() = default;
 
-    [[nodiscard]]
-    constexpr auto await_ready() const noexcept -> bool
+    auto arm() noexcept -> bool
     {
+        if (auto* sqe = context_.sqe()) {
+            ::io_uring_prep_send_zc(sqe, socket_, buffer_.data(), buffer_.size(), 0, 0);
+            ::io_uring_sqe_set_data(sqe, this);
+            context_.track(this);
+            return true;
+        }
+
+        error_code_ = EAGAIN;
         return false;
     }
 
-    auto await_suspend(std::coroutine_handle<> handle) noexcept -> bool;
+    /**
+     * @brief Override to handle the two-CQE send_zc protocol.
+     *
+     * io_uring delivers two CQEs per zero-copy send:
+     * 1. Send result CQE (no special flags): carries bytes sent or error.
+     * 2. Notif CQE (`IORING_CQE_F_NOTIF`): signals that the kernel has
+     *    released its reference to the buffer slice.
+     * `IORING_CQE_F_MORE` is set on the send CQE while the notif is still
+     * pending; the retry decision is deferred until both CQEs arrive.
+     */
+    void complete(int result, std::uint32_t flags) noexcept override
+    {
+        if (!(flags & IORING_CQE_F_NOTIF))
+            set_result(result, flags);
 
-    auto await_resume() -> std::expected<resume_type, std::error_code>;
-
-    void complete(int result, std::uint32_t flags) noexcept override;
-
-    auto context() noexcept -> context_type& { return context_; }
+        if (!(flags & IORING_CQE_F_MORE)) {
+            context_.untrack(this);
+            finish_or_rearm(result, flags);
+        }
+    }
 
 private:
-    context_type& context_;
     int socket_;
-    std::span<const std::byte> buffer_;
-
-    std::coroutine_handle<> handle_{ nullptr };
-    std::size_t bytes_written_{ 0 };
-    int error_code_{ 0 };
-
-    auto arm_zc_write() noexcept -> bool;
-
-    void set_result(int result, std::uint32_t flags) noexcept;
 };
 
 } // namespace net

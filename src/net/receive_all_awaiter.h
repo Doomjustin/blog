@@ -1,18 +1,15 @@
 #ifndef BLOG_NET_RECEIVE_ALL_AWAITER_H
 #define BLOG_NET_RECEIVE_ALL_AWAITER_H
 
-#include <coroutine>
-#include <cstdint>
-#include <expected>
+#include <cstddef>
 #include <span>
-#include <system_error>
 
 #include <liburing.h>
 
 #include <async.h>
 
 namespace net {
-    
+
 /**
  * @brief Suspend until an entire buffer has been filled via io_uring.
  *
@@ -21,15 +18,11 @@ namespace net {
  * connection at any point before the buffer is full, `ECONNABORTED` is
  * returned regardless of how many bytes were already received.
  *
- * Derives from `CancelableOperation` so it can be wrapped by
- * `TimeoutCombinator`; the `parent` pointer routes completions through the
- * combinator when a timeout is active.
+ * Derives from `LoopOperation` (which derives from `CancelableOperation`)
+ * so it can be wrapped by `TimeoutCombinator`.
  */
-class ReceiveAllAwaiter: public async::CancelableOperation {
+class ReceiveAllAwaiter: public async::LoopOperation<ReceiveAllAwaiter, std::span<std::byte>> {
 public:
-    using resume_type = std::size_t;
-    using context_type = async::IOContext;
-
     /**
      * @brief Construct with target fd and destination buffer.
      *
@@ -38,38 +31,28 @@ public:
      * @param buffer  Writable byte span to fill entirely.
      * @pre `buffer` must remain valid until the coroutine resumes.
      */
-    ReceiveAllAwaiter(context_type& context, int socket, std::span<std::byte> buffer);
+    ReceiveAllAwaiter(async::IOContext& context, int socket, std::span<std::byte> buffer)
+      : async::LoopOperation<ReceiveAllAwaiter, std::span<std::byte>>{ context, buffer }
+      , socket_{ socket }
+    {}
 
     ~ReceiveAllAwaiter() = default;
 
-    [[nodiscard]]
-    constexpr auto await_ready() const noexcept -> bool
+    auto arm() noexcept -> bool
     {
+        if (auto* sqe = context_.sqe()) {
+            ::io_uring_prep_recv(sqe, socket_, buffer_.data(), buffer_.size(), 0);
+            ::io_uring_sqe_set_data(sqe, this);
+            context_.track(this);
+            return true;
+        }
+
+        error_code_ = EAGAIN;
         return false;
     }
 
-    auto await_suspend(std::coroutine_handle<> handle) noexcept -> bool;
-
-    auto await_resume() -> std::expected<resume_type, std::error_code>;
-
-    void complete(int result, std::uint32_t flags) noexcept override;
-
-    [[nodiscard]]
-    auto context() noexcept -> context_type& { return context_; }
-
 private:
-    context_type& context_;
     int socket_;
-    std::span<std::byte> buffer_;
-    std::size_t expected_to_read_{ buffer_.size() };
-
-    std::coroutine_handle<> handle_;
-    std::size_t bytes_read_{ 0 };
-    int error_code_{ 0 };
-
-    auto arm_read() noexcept -> bool;
-
-    void set_result(int result, std::uint32_t flags) noexcept;
 };
 
 } // namespace net

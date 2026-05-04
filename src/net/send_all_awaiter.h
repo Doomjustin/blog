@@ -1,12 +1,8 @@
 #ifndef BLOG_NET_SEND_ALL_AWAITER_H
 #define BLOG_NET_SEND_ALL_AWAITER_H
 
-#include <cerrno>
-#include <coroutine>
 #include <cstddef>
-#include <expected>
 #include <span>
-#include <system_error>
 
 #include <sys/socket.h>
 
@@ -19,20 +15,15 @@ namespace net {
 /**
  * @brief Suspend until an entire buffer has been sent via io_uring.
  *
- * Unlike `WriteSomeAwaiter`, which issues a single `send` and returns
- * however many bytes were accepted, this awaiter retries until the full
+ * Unlike a single-shot send awaiter, this awaiter retries until the full
  * span has been delivered or an error occurs. Partial writes resubmit the
  * remainder automatically without suspending the caller again.
  *
- * Derives from `CancelableOperation` so it can be wrapped by
- * `TimeoutCombinator`; the `parent` pointer routes completions through the
- * combinator when a timeout is active.
+ * Derives from `LoopOperation` (which derives from `CancelableOperation`)
+ * so it can be wrapped by `TimeoutCombinator`.
  */
-class SendAllAwaiter: public async::CancelableOperation {
+class SendAllAwaiter: public async::LoopOperation<SendAllAwaiter, std::span<const std::byte>> {
 public:
-    using resume_type = std::size_t;
-    using context_type = async::IOContext;
-
     /**
      * @brief Construct with target fd and full source buffer.
      *
@@ -41,37 +32,28 @@ public:
      * @param buffer  Read-only byte span to send in full.
      * @pre `buffer` must remain valid until the coroutine resumes.
      */
-    SendAllAwaiter(context_type& context, int socket, std::span<const std::byte> buffer);
+    SendAllAwaiter(async::IOContext& context, int socket, std::span<const std::byte> buffer)
+      : async::LoopOperation<SendAllAwaiter, std::span<const std::byte>>{ context, buffer }
+      , socket_{ socket }
+    {}
 
     ~SendAllAwaiter() = default;
 
-    [[nodiscard]]
-    constexpr auto await_ready() const noexcept -> bool
+    auto arm() noexcept -> bool
     {
+        if (auto* sqe = context_.sqe()) {
+            ::io_uring_prep_send(sqe, socket_, buffer_.data(), buffer_.size(), 0);
+            ::io_uring_sqe_set_data(sqe, this);
+            context_.track(this);
+            return true;
+        }
+
+        error_code_ = EAGAIN;
         return false;
     }
 
-    auto await_suspend(std::coroutine_handle<> handle) noexcept -> bool;
-
-    auto await_resume() -> std::expected<resume_type, std::error_code>;
-
-    void complete(int result, std::uint32_t flags) noexcept override;
-
-    auto context() noexcept -> context_type& { return context_; }
-
 private:
-    context_type& context_;
     int socket_;
-    std::span<const std::byte> buffer_;
-    std::size_t expected_to_write_{ buffer_.size() };
-
-    std::coroutine_handle<> handle_{ nullptr };
-    std::size_t bytes_written_{ 0 };
-    int error_code_{ 0 };
-
-    auto arm_write() noexcept -> bool;
-
-    void set_result(int result, std::uint32_t flags) noexcept;
 };
 
 } // namespace net

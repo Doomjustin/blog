@@ -7,6 +7,7 @@
 #include <detached_task.h>
 #include <final_awaiter.h>
 #include <io_context.h>
+#include <loop_operation.h>
 #include <operation.h>
 #include <poll_awaiter.h>
 #include <read_awaiter.h>
