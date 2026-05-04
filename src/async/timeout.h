@@ -55,6 +55,7 @@ auto timeout(Operation&& operation, Duration timeout) -> TimeoutAwaiter<std::dec
  * @endcode
  */
 template<cancelable_operation Operation, chrono_duration Duration>
+    requires (!single_shot_only_operation<Operation>)
 auto timeout(Operation&& operation, Duration timeout) -> TimeoutCombinator<std::decay_t<Operation>>
 {
     return TimeoutCombinator<std::decay_t<Operation>>{ std::forward<Operation>(operation), timeout };

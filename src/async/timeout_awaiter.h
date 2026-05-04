@@ -33,7 +33,7 @@ concept single_shot_only_operation = requires (T& op, ::io_uring_sqe* sqe, std::
     op.prepare(sqe);
     op.set_result(0, 0);
     { op.await_resume() } -> std::same_as<std::expected<typename T::resume_type, std::error_code>>;
-} && std::derived_from<T, Operation>;
+};
 
 
 /**
@@ -156,7 +156,7 @@ concept cancelable_operation = requires(T& t)
 
     requires std::is_lvalue_reference_v<decltype(t.context())>;
     t.await_suspend(std::coroutine_handle<>());
-} && std::derived_from<T, CancelableOperation>;
+};
 
 
 /**
