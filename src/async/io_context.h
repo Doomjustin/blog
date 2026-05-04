@@ -78,7 +78,7 @@ public:
      * @return Pointer to a fresh, zeroed SQE ready for preparation.
      */
     [[nodiscard]]
-    auto sqe() -> ::io_uring_sqe*;
+    auto sqe() noexcept -> ::io_uring_sqe*;
 
     /**
      * @brief Signal the event loop to exit.
@@ -287,6 +287,7 @@ private:
         static constexpr unsigned INIT_BGID{ 0 };
 
         std::pmr::memory_resource* memory_resource_;
+        ::io_uring* ring_{ nullptr };
         std::array<BufferRing, GROUP_SIZE> group_;
         unsigned next_bgid_{ INIT_BGID };
         std::optional<unsigned> default_buffer_bgid_;

@@ -20,6 +20,25 @@ void push(IOContext& context);
 
 void erase(IOContext& context);
 
+struct ContextGuard {
+    explicit ContextGuard(IOContext& ctx) 
+      : ctx_{ ctx } 
+    { 
+        push(ctx_); 
+    }
+
+    ContextGuard(const ContextGuard&) = delete;
+    auto operator=(const ContextGuard&) -> ContextGuard& = delete;
+
+    ~ContextGuard() 
+    { 
+        erase(ctx_); 
+    }
+
+private:
+    IOContext& ctx_;
+};
+
 } // namespace detail
 
 
@@ -40,12 +59,9 @@ template<typename Awaiter, typename... Args>
              (std::copy_constructible<Args> && ...)
 void run(Awaiter&& awaiter, Args&&... args) 
 {
-    detail::push(this_coroutine::context());
-
+    detail::ContextGuard guard{ this_coroutine::context() };
     co_spawn(std::invoke(awaiter, args...));
     this_coroutine::context().run();
-
-    detail::erase(this_coroutine::context());
 }
 
 /**
@@ -71,12 +87,9 @@ void run(std::integral auto thread_count, Awaiter&& awaiter, Args&&... args)
     for (int i = 1; i < thread_count; ++i) {
         threads.emplace_back([awaiter, args...]() mutable -> void 
         {
-            detail::push(this_coroutine::context());
-
+            detail::ContextGuard guard{ this_coroutine::context() };
             co_spawn(std::invoke(awaiter, args...));
             this_coroutine::context().run();
-            
-            detail::erase(this_coroutine::context());
         });
     }
 

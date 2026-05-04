@@ -25,13 +25,9 @@ void IOContext::run()
     }
 }
 
-auto IOContext::sqe() -> ::io_uring_sqe*
+auto IOContext::sqe() noexcept -> ::io_uring_sqe*
 {
-    auto* sqe = scheduler_.sqe();
-    if (!sqe)
-        throw std::runtime_error("No SQE available");
-
-    return sqe;
+    return scheduler_.sqe();
 }
 
 void IOContext::stop()
@@ -172,6 +168,8 @@ IOContext::BufferRingGroup::~BufferRingGroup()
     auto release = [this](BufferRing& buffer) -> void
     {
         if (buffer.base_address) {
+            const auto bgid = static_cast<int>(&buffer - group_.data());
+            ::io_uring_free_buf_ring(ring_, buffer.buffer, buffer.entries, bgid);
             const auto dealloc_size = static_cast<std::size_t>(buffer.entries * buffer.size);
             memory_resource_->deallocate(buffer.base_address, dealloc_size, ALIGNMENT);
             buffer.base_address = nullptr;
@@ -186,6 +184,7 @@ auto IOContext::BufferRingGroup::setup(::io_uring* ring, unsigned entries, unsig
     if (next_bgid_ > MAX_BGID)
         throw std::runtime_error("Exceeded maximum number of ring buffers");
 
+    ring_ = ring;
     auto bgid = next_bgid_++;
     auto& buffer_ring = group_[bgid];
 

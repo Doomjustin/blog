@@ -29,7 +29,8 @@ auto AddressV4::operator<=>(const AddressV4& other) const noexcept -> std::stron
 auto AddressV4::from_string(std::string_view address) -> AddressV4
 {
     AddressV4 result;
-    auto res = ::inet_pton(AF_INET, address.data(), &result.address);
+    std::string addr_str{ address };
+    auto res = ::inet_pton(AF_INET, addr_str.data(), &result.address);
     if (res != 1)
         throw_system_error("Failed to convert string to IPv4 address");
 
@@ -70,7 +71,8 @@ auto AddressV6::operator<=>(const AddressV6& other) const noexcept -> std::stron
 auto AddressV6::from_string(std::string_view address) -> AddressV6
 {
     AddressV6 result;
-    auto res = ::inet_pton(AF_INET6, address.data(), &result.address);
+    std::string addr_str{ address };
+    auto res = ::inet_pton(AF_INET6, addr_str.data(), &result.address);
     if (res != 1)
         throw_system_error("Failed to convert string to IPv6 address");
 
@@ -102,12 +104,14 @@ auto Address::operator<=>(const Address& other) const noexcept -> std::strong_or
 
 auto Address::from_string(std::string_view address) -> Address
 {
+    std::string addr_str{ address };
+
     AddressV4 ipv4{};
-    if (::inet_pton(AF_INET, address.data(), &ipv4.address) == 1)
+    if (::inet_pton(AF_INET, addr_str.data(), &ipv4.address) == 1)
         return { ipv4 };
 
     AddressV6 ipv6{};
-    if (::inet_pton(AF_INET6, address.data(), &ipv6.address) == 1)
+    if (::inet_pton(AF_INET6, addr_str.data(), &ipv6.address) == 1)
         return { ipv6 };
 
     throw_system_error("Invalid IP address format");
