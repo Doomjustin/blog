@@ -100,6 +100,9 @@ int main()
 | 7 | [line_protocol](docs/examples/07_line_protocol.md) | `receive_stream()` 流式读取、协议分帧 |
 | 8 | [scatter_gather](docs/examples/08_scatter_gather.md) | 多缓冲区分散写，HTTP 响应模式 |
 | 9 | [zero_copy_send](docs/examples/09_zero_copy_send.md) | `IORING_OP_SEND_ZC` 零拷贝发送 |
+| 10 | [stop_then_sleep](docs/examples/10_stop_then_sleep.md) | `async::stop_then` 基础用法，可取消的等待 |
+| 11 | [stop_then_request](docs/examples/11_stop_then_request.md) | 请求循环中逐操作取消，stop 在最近 I/O 点生效 |
+| 12 | [stop_then_resilient](docs/examples/12_stop_then_resilient.md) | 带超时与重试的韧性客户端，stop 优先级最高 |
 
 ## 博客
 
