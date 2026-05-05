@@ -96,11 +96,6 @@ public:
     BasicAcceptor(const BasicAcceptor&) = delete;
     auto operator=(const BasicAcceptor&) -> BasicAcceptor& = delete;
 
-    BasicAcceptor(BasicAcceptor&& other) noexcept = default;
-    auto operator=(BasicAcceptor&& other) noexcept -> BasicAcceptor& = default;
-
-    ~BasicAcceptor() = default;
-
     /**
      * @brief Make backlog policy explicit at startup boundaries.
      *

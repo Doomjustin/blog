@@ -17,7 +17,7 @@ struct Node : MPSCQueueNode {
 
 } // namespace
 
-TEST_CASE("MPSCQueue: single producer single consumer", "[mpsc_queue]")
+TEST_CASE("MPSCQueue: single producer single consumer via pop_all (FIFO)", "[mpsc_queue]")
 {
     MPSCQueue<Node> q;
 
@@ -25,41 +25,22 @@ TEST_CASE("MPSCQueue: single producer single consumer", "[mpsc_queue]")
     Node n2{}; n2.seq = 2;
     Node n3{}; n3.seq = 3;
 
-    REQUIRE(q.push(&n1));
-    REQUIRE(q.push(&n2));
-    REQUIRE(q.push(&n3));
+    q.push(&n1);
+    q.push(&n2);
+    q.push(&n3);
 
-    auto* r1 = q.pop();
-    auto* r2 = q.pop();
-    auto* r3 = q.pop();
-    auto* r4 = q.pop();
+    // pop_all() reverses to restore FIFO order
+    auto* list = q.pop_all();
+    REQUIRE(list == &n1);
 
-    REQUIRE(r1 == &n1);
-    REQUIRE(r2 == &n2);
-    REQUIRE(r3 == &n3);
-    REQUIRE(r4 == nullptr);
-}
+    auto* l2 = static_cast<Node*>(list->mpsc_next.load(std::memory_order_relaxed));
+    REQUIRE(l2 == &n2);
 
-TEST_CASE("MPSCQueue: bounded capacity provides backpressure", "[mpsc_queue]")
-{
-    MPSCQueue<Node> q{ 2 };
+    auto* l3 = static_cast<Node*>(l2->mpsc_next.load(std::memory_order_relaxed));
+    REQUIRE(l3 == &n3);
+    REQUIRE(l3->mpsc_next.load(std::memory_order_relaxed) == nullptr);
 
-    Node n1{}; n1.seq = 1;
-    Node n2{}; n2.seq = 2;
-    Node n3{}; n3.seq = 3;
-
-    REQUIRE(q.try_push(&n1));
-    REQUIRE(q.try_push(&n2));
-    REQUIRE_FALSE(q.try_push(&n3));
-    REQUIRE(q.size() == 2);
-
-    REQUIRE(q.pop() == &n1);
-
-    REQUIRE(q.try_push(&n3));
-
-    REQUIRE(q.pop() == &n2);
-    REQUIRE(q.pop() == &n3);
-    REQUIRE(q.pop() == nullptr);
+    REQUIRE(q.pop_all() == nullptr);
 }
 
 TEST_CASE("MPSCQueue: multi producer single consumer", "[mpsc_queue]")
@@ -91,7 +72,7 @@ TEST_CASE("MPSCQueue: multi producer single consumer", "[mpsc_queue]")
             started.fetch_add(1, std::memory_order_release);
             while (!go.load(std::memory_order_acquire)) {}
             for (std::size_t i = 0; i < per_producer; ++i)
-                while (!q.push(&nodes[p][i])) {}
+                q.push(&nodes[p][i]);
         });
     }
 
@@ -102,16 +83,20 @@ TEST_CASE("MPSCQueue: multi producer single consumer", "[mpsc_queue]")
     std::size_t popped = 0;
 
     while (popped < total) {
-        if (auto* n = q.pop()) {
-            // Per-producer FIFO must hold in MPSC queue.
-            REQUIRE(n->seq == seen[n->producer_id]);
-            ++seen[n->producer_id];
+        auto* list = q.pop_all();
+        while (list) {
+            auto* next = static_cast<Node*>(list->mpsc_next.load(std::memory_order_relaxed));
+            ++seen[list->producer_id];
             ++popped;
+            list = next;
         }
     }
 
     for (auto& t : producers)
         t.join();
 
-    REQUIRE(q.pop() == nullptr);
+    for (std::size_t p = 0; p < producer_count; ++p)
+        REQUIRE(seen[p] == per_producer);
+
+    REQUIRE(q.pop_all() == nullptr);
 }

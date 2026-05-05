@@ -24,8 +24,6 @@ public:
         buffer_{ buffer }
     {}
 
-    ~WriteAwaiter() = default;
-
     void prepare(::io_uring_sqe* sqe) noexcept
     {
         ::io_uring_prep_write(sqe, fd_, buffer_.data(), buffer_.size(), -1);

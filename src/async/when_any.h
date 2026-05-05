@@ -75,8 +75,6 @@ public:
         setup_slots(std::index_sequence_for<Awaiters...>{});
     }
 
-    ~WhenAnyAwaiter() = default;
-
     [[nodiscard]]
     constexpr auto await_ready() const noexcept -> bool
     {

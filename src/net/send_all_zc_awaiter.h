@@ -42,14 +42,12 @@ public:
       , socket_{ socket }
     {}
 
-    ~SendAllZCAwaiter() = default;
-
     auto arm() noexcept -> bool
     {
-        if (auto* sqe = context_.sqe()) {
+        if (auto* sqe = context_->sqe()) {
             ::io_uring_prep_send_zc(sqe, socket_, buffer_.data(), buffer_.size(), 0, 0);
             ::io_uring_sqe_set_data(sqe, this);
-            context_.track(this);
+            context_->track(this);
             return true;
         }
 
@@ -73,7 +71,7 @@ public:
             set_result(result, flags);
 
         if (!(flags & IORING_CQE_F_MORE)) {
-            context_.untrack(this);
+            context_->untrack(this);
             finish_or_rearm(result, flags);
         }
     }

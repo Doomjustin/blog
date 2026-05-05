@@ -5,6 +5,10 @@
 #include <cstdint>
 #include <utility>
 
+#include "mpsc_queue.h"
+
+#include <common.h>
+
 namespace async {
 
 /**
@@ -14,11 +18,15 @@ namespace async {
  * SQE user-data field. When the corresponding CQE arrives, the event loop
  * calls `complete` to deliver the result and resume the waiting coroutine.
  */
-struct Operation {
+struct Operation: public MPSCQueueNode {
     Operation* prev{ nullptr };
     Operation* next{ nullptr };
     bool is_canceling_{ false };
     
+    Operation() = default;
+    Operation(Operation&&) = default;
+    auto operator=(Operation&&) -> Operation& = default;
+
     virtual ~Operation() = default;
 
     /**
@@ -53,7 +61,9 @@ struct CancelableOperation : public Operation {
     CancelableOperation* parent{ nullptr };
     
     CancelableOperation() = default;
-    
+    CancelableOperation(CancelableOperation&&) = default;
+    auto operator=(CancelableOperation&&) -> CancelableOperation& = default;
+
     virtual ~CancelableOperation() = default;
 
     /**

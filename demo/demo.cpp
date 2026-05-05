@@ -41,7 +41,7 @@ auto session(net::ip::tcp::socket client) -> async::Task<>
 
 auto echo() -> async::Task<>
 {
-    async::setup_buffer_ring(128, 4096);
+    async::this_coroutine::setup_buffer_ring(128, 4096);
 
     auto endpoint = net::ip::tcp::endpoint{ net::ip::AddressV6::loopback(), 12345 };
     log::info("Server listening on {}", endpoint);

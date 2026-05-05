@@ -47,8 +47,6 @@ public:
       : awaiters_{ std::forward<Awaiters>(awaiters)... }
     {}
 
-    ~WhenAllAwaiter() = default;
-
     [[nodiscard]]
     constexpr auto await_ready() const noexcept -> bool
     {

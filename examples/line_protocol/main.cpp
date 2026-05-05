@@ -54,7 +54,7 @@ auto session(net::ip::tcp::socket client, net::ip::tcp::endpoint peer) -> async:
 
 auto line_server(std::uint16_t port) -> async::Task<>
 {
-    async::setup_buffer_ring(128, 4096);
+    async::this_coroutine::setup_buffer_ring(128, 4096);
 
     auto endpoint = net::ip::tcp::endpoint{ net::ip::AddressV4::any(), port };
     auto acceptor = net::ip::tcp::acceptor{ endpoint, true };

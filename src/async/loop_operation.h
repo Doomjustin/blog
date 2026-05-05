@@ -45,9 +45,12 @@ public:
      * @param buffer  Span covering the entire data to send or receive.
      */
     LoopOperation(context_type& context, SpanType buffer)
-      : context_{ context }
+      : context_{ &context }
       , buffer_{ buffer }
     {}
+
+    LoopOperation(LoopOperation&&) = default;
+    auto operator=(LoopOperation&&) -> LoopOperation& = default;
 
     ~LoopOperation() = default;
 
@@ -88,14 +91,14 @@ public:
      */
     void complete(int result, std::uint32_t flags) noexcept override
     {
-        context_.untrack(this);
+        context_->untrack(this);
         set_result(result, flags);
         finish_or_rearm(result, flags);
     }
 
     auto context() noexcept -> context_type&
     {
-        return context_;
+        return *context_;
     }
 
 protected:
@@ -141,7 +144,7 @@ protected:
         }
     }
 
-    context_type& context_;
+    context_type* context_;
     SpanType buffer_;
     std::coroutine_handle<> handle_{ nullptr };
     std::size_t bytes_processed_{ 0 };

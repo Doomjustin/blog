@@ -96,11 +96,6 @@ public:
       : base_socket_type{ fd, context }
     {}
 
-    StreamSocket(StreamSocket&&) = default;
-    auto operator=(StreamSocket&&) -> StreamSocket& = default;
-
-    ~StreamSocket() = default;
-
     /**
      * @brief Connect to a remote peer.
      *

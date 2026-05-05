@@ -8,13 +8,16 @@
 #include <limits>
 #include <memory_resource>
 #include <optional>
+#include <thread>
 
 #include <sys/eventfd.h>
 #include <sys/poll.h>
 
 #include <gsl/gsl>
+#include <gsl/pointers>
 #include <liburing.h>
 
+#include <common.h>
 #include <operation.h>
 
 namespace async {
@@ -209,6 +212,22 @@ public:
         return buffers_.buffer_ring(bgid);
     }
 
+    void post(gsl::not_null<Operation*> operation) noexcept
+    {
+        scheduler_.post(operation);
+    }
+
+    [[nodiscard]]
+    auto is_owner_thread() const noexcept -> bool
+    {
+        return std::this_thread::get_id() == thread_id_;
+    }
+
+    void submit(gsl::not_null<Operation*> operation) noexcept
+    {
+        scheduler_.submit(operation);
+    }
+
 private:
     class Scheduler {
     public:
@@ -231,6 +250,17 @@ private:
 
         void schedule();
 
+        void post(gsl::not_null<Operation*> operation) noexcept
+        {
+            cross_thread_operations_.push(operation);
+            wakeup();
+        }
+
+        void submit(gsl::not_null<Operation*> operation) noexcept
+        {
+            local_operations_.push_back(operation);
+        }
+
     private:
         static constexpr auto WAKEUP_MARKER = std::numeric_limits<std::uintptr_t>::max();
 
@@ -238,9 +268,16 @@ private:
         int wakeup_fd_;
         ::io_uring_cqe* cqe_{ nullptr };
 
+        MPSCQueue<Operation> cross_thread_operations_;
+        std::vector<Operation*> local_operations_;
+
         void arm_wakeup();
 
         void resume_wakeup();
+        
+        void process_cross_thread_operations() noexcept;
+
+        void process_local_operations() noexcept;
     };
 
     class BufferRingGroup {
@@ -298,6 +335,7 @@ private:
 
     Operation* head_{ nullptr };
     Operation* tail_{ nullptr };
+    std::thread::id thread_id_{ std::this_thread::get_id() };
     std::size_t tracking_operations_{ 0 };
     std::atomic<bool> should_stop_{ false };
 };

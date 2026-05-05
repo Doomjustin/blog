@@ -49,8 +49,6 @@ public:
         }
     }
 
-    ~WriteSequenceAwaiter() = default;
-
     /** @brief Fill SQE as a writev request using cached iovec descriptors. */
     void prepare(::io_uring_sqe* sqe) noexcept
     {

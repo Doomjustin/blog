@@ -24,8 +24,6 @@ public:
         buffer_{ buffer }
     {}
 
-    ~SendAwaiter() = default;
-
     void prepare(::io_uring_sqe* sqe) noexcept
     {
         ::io_uring_prep_send(sqe, fd_, buffer_.data(), buffer_.size(), 0);

@@ -36,14 +36,12 @@ public:
       , socket_{ socket }
     {}
 
-    ~ReceiveAllAwaiter() = default;
-
     auto arm() noexcept -> bool
     {
-        if (auto* sqe = context_.sqe()) {
+        if (auto* sqe = context_->sqe()) {
             ::io_uring_prep_recv(sqe, socket_, buffer_.data(), buffer_.size(), 0);
             ::io_uring_sqe_set_data(sqe, this);
-            context_.track(this);
+            context_->track(this);
             return true;
         }
 

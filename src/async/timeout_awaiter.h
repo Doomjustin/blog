@@ -50,8 +50,6 @@ public:
         timeout_.tv_nsec = duration_cast<nanoseconds>(timeout % 1s).count();
     }
 
-    ~TimeoutAwaiter() = default;
-
     [[nodiscard]]
     constexpr auto await_ready() const noexcept
     {

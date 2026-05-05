@@ -10,12 +10,14 @@
 #include <loop_operation.h>
 #include <operation.h>
 #include <poll_awaiter.h>
+#include <post.h>
 #include <read_awaiter.h>
 #include <retry.h>
 #include <run.h>
 #include <signals.h>
 #include <single_operation.h>
 #include <sleep_for.h>
+#include <stop_then.h>
 #include <task.h>
 #include <this_coroutine.h>
 #include <timeout.h>

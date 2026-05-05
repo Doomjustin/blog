@@ -45,8 +45,11 @@ public:
      * @param context I/O context whose SQ will receive the SQE.
      */
     SingleOperation(context_type& context)
-      : context_{ context }
+      : context_{ &context }
     {}
+
+    SingleOperation(SingleOperation&&) = default;
+    auto operator=(SingleOperation&&) -> SingleOperation& = default;
 
     ~SingleOperation() = default;
 
@@ -66,11 +69,11 @@ public:
     {
         this->handle_ = handle;
 
-        if (auto* sqe = context_.sqe()) {
+        if (auto* sqe = context_->sqe()) {
             static_cast<Derived*>(this)->prepare(sqe);
             ::io_uring_sqe_set_data(sqe, this);
 
-            context_.track(this);
+            context_->track(this);
             return true;
         }
 
@@ -105,7 +108,7 @@ public:
      */
     void complete(int result, std::uint32_t flags) noexcept override
     {
-        context_.untrack(this);
+        context_->untrack(this);
 
         if (result < 0)
             error_code_ = -result;
@@ -117,11 +120,11 @@ public:
 
     auto context() noexcept -> context_type&
     {
-        return context_;
+        return *context_;
     }
 
 protected:
-    context_type& context_;
+    context_type* context_;
     std::coroutine_handle<> handle_{ nullptr };
     int error_code_{ 0 };
 };

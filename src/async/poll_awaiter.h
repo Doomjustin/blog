@@ -29,8 +29,6 @@ public:
         events_{ events }
     {}
 
-    ~PollAwaiter() = default;
-
     void prepare(::io_uring_sqe* sqe) noexcept
     {
         ::io_uring_prep_poll_add(sqe, fd_, events_);

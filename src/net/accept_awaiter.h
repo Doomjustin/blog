@@ -3,7 +3,6 @@
 
 #include <coroutine>
 #include <expected>
-#include <utility>
 
 #include <liburing.h>
 
@@ -22,8 +21,9 @@ namespace net {
  * @tparam Protocol Protocol type defining `socket` and `endpoint` associated types.
  */
 template<typename Protocol>
-class AcceptAwaiter: public async::Operation {
+class AcceptAwaiter: public async::CancelableOperation {
 public:
+    using is_single_shot = void;
     using socket_type = typename Protocol::socket;
     using endpoint_type = typename Protocol::endpoint;
     using context_type = async::IOContext;
@@ -39,13 +39,11 @@ public:
      * @pre If non-null, `*peer` must remain valid until the coroutine is resumed.
      */
     AcceptAwaiter(context_type& context, int fd, endpoint_type* peer = nullptr)
-      : context_{ context }, fd_{ fd }, peer_{ peer }
+      : context_{ &context }, fd_{ fd }, peer_{ peer }
     {
         if (peer_)
             addrlen_ = peer_->capacity();
     } 
-
-    ~AcceptAwaiter() = default;
 
     [[nodiscard]] 
     constexpr auto await_ready() const noexcept -> bool
@@ -57,7 +55,7 @@ public:
     {
         handle_ = handle;
 
-        auto* sqe = context_.sqe();
+        auto* sqe = context_->sqe();
         prepare(sqe);
         ::io_uring_sqe_set_data(sqe, this);
 
@@ -69,7 +67,7 @@ public:
         if (error_code_ != 0)
             return unexpected_system_error(error_code_);
 
-        return resume_type{ result_fd_, context_ };
+        return resume_type{ result_fd_, *context_ };
     }
 
     void prepare(::io_uring_sqe* sqe) noexcept
@@ -98,16 +96,13 @@ public:
         if (peer_ && result >= 0)
             peer_->resize(addrlen_);
 
-        if (handle_) {
-            auto handle = std::exchange(handle_, nullptr);
-            handle.resume();
-        }
+        this->resume(handle_, result, flags);
     }
 
-    auto context() noexcept -> context_type& { return context_; }
+    auto context() noexcept -> context_type& { return *context_; }
 
 private:
-    context_type& context_;
+    context_type* context_;
     int fd_;
     endpoint_type* peer_;
     socklen_t addrlen_{};

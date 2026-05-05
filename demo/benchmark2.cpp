@@ -42,7 +42,7 @@ auto session(net::ip::tcp::socket socket) -> async::Task<>
 
 auto http() -> async::Task<>
 {
-    async::setup_buffer_ring(1024);
+    async::this_coroutine::setup_buffer_ring(1024);
 
     auto endpoint = net::ip::tcp::endpoint{ net::ip::AddressV4::loopback(), 12345 };
     auto acceptor = net::ip::tcp::acceptor{ endpoint, true };

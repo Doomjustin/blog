@@ -111,7 +111,10 @@ auto IOContext::Scheduler::sqe() -> ::io_uring_sqe*
 
 void IOContext::Scheduler::schedule()
 {
-    auto res = ::io_uring_submit_and_wait(&ring_, 1);
+    process_local_operations();
+
+    unsigned wait_for = local_operations_.empty() ? 1 : 0;
+    auto res = ::io_uring_submit_and_wait(&ring_, wait_for);
     if (res < 0) {
         if (res == -EINTR) return;
 
@@ -126,6 +129,9 @@ void IOContext::Scheduler::schedule()
 
         if (::io_uring_cqe_get_data64(cqe_) == WAKEUP_MARKER) {
             resume_wakeup();
+
+            process_cross_thread_operations();
+
             arm_wakeup();
             continue;
         }
@@ -162,6 +168,23 @@ void IOContext::Scheduler::resume_wakeup()
     ::read(wakeup_fd_, &val, sizeof(val));
 }
 
+void IOContext::Scheduler::process_cross_thread_operations() noexcept
+{
+    auto* operation = cross_thread_operations_.pop_all();
+    while (operation) {
+        auto* next = static_cast<Operation*>(operation->mpsc_next.load(std::memory_order_relaxed));
+        operation->complete(0, 0);
+        operation = next;
+    }
+}
+
+void IOContext::Scheduler::process_local_operations() noexcept
+{
+    for (auto* operation : local_operations_)
+        operation->complete(0, 0);
+    
+    local_operations_.clear();
+}
 
 IOContext::BufferRingGroup::~BufferRingGroup()
 {

@@ -25,6 +25,20 @@ namespace async {
  * Both the IO and delay phases set `parent = this`, so external cancellation
  * (e.g. from `when_any` or `timeout`) routes correctly through `complete()`.
  *
+ * @note **Not recommended for typical use.** `RetryCombinator` (and the
+ * `retry()` helper) does not offer meaningful advantages over a hand-written
+ * retry loop:
+ * - The operation must be wrapped in a factory lambda, capturing all
+ *   relevant context manually.
+ * - Error classification (which errors are retryable) still lives outside
+ *   this combinator; it retries on any non-zero result unconditionally.
+ * - Integrating a `stop_token` requires an additional `stop_then` wrapper
+ *   around each factory invocation, which is no simpler than doing it in a
+ *   plain loop.
+ * - A hand-written loop is easier to read and extend.
+ *
+ * Prefer a loop with `stop_then` and `async::timeout` directly.
+ *
  * @tparam Factory       Nullary callable returning a `cancelable_operation`.
  * @tparam DelayStrategy Callable `(std::size_t) -> chrono_duration`.
  *
@@ -195,7 +209,11 @@ auto exponential(Delay initial_delay, float multiplier)
 /**
  * @brief Retry with a user-supplied delay strategy.
  *
- * @param max_retries   Total number of attempts.
+ * @note **Not recommended for typical use.** See `RetryCombinator` for
+ * rationale. Prefer a hand-written loop with `stop_then` and
+ * `async::timeout` directly.
+ *
+ * @param max_retries    Total number of attempts.
  * @param delay_strategy Callable `(std::size_t attempt) -> chrono_duration`.
  * @param factory        Nullary callable returning a `cancelable_operation`.
  *

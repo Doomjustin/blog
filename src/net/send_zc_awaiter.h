@@ -33,8 +33,6 @@ public:
         buffer_{ buffer }
     {}
 
-    ~SendZCAwaiter() = default;
-
     void prepare(::io_uring_sqe* sqe) noexcept
     {
         ::io_uring_prep_send_zc(sqe, fd_, buffer_.data(), buffer_.size(), 0, 0);
