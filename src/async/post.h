@@ -9,34 +9,29 @@ namespace async {
 template<typename Func>
 class DispatchOperation: public Operation {
 public:
-    DispatchOperation(IOContext& context, Func&& f, bool always = false)
+    DispatchOperation(IOContext& context, Func&& f)
       : context_{ &context }
       , func_{ std::forward<Func>(f) }
-      , always_{ always }
     {}
 
-    void complete(int result, std::uint32_t flags) noexcept override
+    void complete(int /*result*/, std::uint32_t /*flags*/) noexcept override
     {
         context_->drop_work();
-
-        if (always_ || result != -ECANCELED)
-            func_();
-
+        func_();
         delete this;
     }
 
 private:
     IOContext* context_;
     Func func_;
-    bool always_;
 };
 
 template<typename Func>
-void post(IOContext& context, Func&& f, bool always = false)
+void post(IOContext& context, Func&& f)
 {
     // 强制堆分配以确保操作对象在 complete() 中仍然有效
     context.add_work();
-    auto* op = new DispatchOperation<Func>{ context, std::forward<Func>(f), always };
+    auto* op = new DispatchOperation<Func>{ context, std::forward<Func>(f) };
     context.post(op);
 }
 
