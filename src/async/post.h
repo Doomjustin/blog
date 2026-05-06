@@ -17,7 +17,10 @@ public:
     void complete(int result, std::uint32_t flags) noexcept override
     {
         context_->drop_work();
-        func_();
+
+        if (result != -ECANCELED)
+            func_();
+
         delete this;
     }
 

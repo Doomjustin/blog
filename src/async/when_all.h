@@ -1,6 +1,7 @@
 #ifndef BLOG_ASYNC_WHEN_ALL_AWAITER_H
 #define BLOG_ASYNC_WHEN_ALL_AWAITER_H
 
+#include <array>
 #include <coroutine>
 #include <cstddef>
 #include <expected>
@@ -100,6 +101,7 @@ public:
 
 private:
     std::tuple<Awaiters...> awaiters_;
+    std::array<bool, sizeof...(Awaiters)> armed_{};
     std::coroutine_handle<> handle_;
     int pending_{ static_cast<int>(sizeof...(Awaiters)) };
 
@@ -120,7 +122,14 @@ private:
     template<std::size_t I>
     void arm_one(bool& any_armed) noexcept
     {
-        if (std::get<I>(awaiters_).await_suspend(handle_)) {
+        auto& awaiter = std::get<I>(awaiters_);
+        if (awaiter.await_ready()) {
+            --pending_;
+            return;
+        }
+
+        if (awaiter.await_suspend(handle_)) {
+            armed_[I] = true;
             any_armed = true;
             return;
         }
@@ -137,7 +146,7 @@ private:
     template<std::size_t... Is>
     void cancel_all(std::index_sequence<Is...> /*index*/) noexcept
     {
-        (..., std::get<Is>(awaiters_).cancel());
+        (..., (void)(armed_[Is] && (std::get<Is>(awaiters_).cancel(), true)));
     }
 };
 

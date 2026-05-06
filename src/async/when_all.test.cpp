@@ -18,6 +18,10 @@ struct FakeState {
     bool cancel_called{ false };
     bool suspended{ false };
     bool arm_ok{ true };
+    bool ready{ false };
+    int suspend_calls{ 0 };
+    int cancel_calls{ 0 };
+    int ready_result{ 0 };
     async::CancelableOperation* self{ nullptr };
 };
 
@@ -25,22 +29,26 @@ class FakeCancelable final: public async::CancelableOperation {
 public:
     using resume_type = int;
 
-    explicit FakeCancelable(std::shared_ptr<FakeState> state, bool arm_ok = true)
+    explicit FakeCancelable(std::shared_ptr<FakeState> state, bool arm_ok = true, bool ready = false, int ready_result = 0)
       : state_{ std::move(state) }
     {
         state_->arm_ok = arm_ok;
+        state_->ready = ready;
+        state_->ready_result = ready_result;
+        result_ = ready_result;
     }
 
     [[nodiscard]]
     constexpr auto await_ready() const noexcept -> bool
     {
-        return false;
+        return state_->ready;
     }
 
     auto await_suspend(std::coroutine_handle<> handle) noexcept -> bool
     {
         handle_ = handle;
         state_->self = this;
+        ++state_->suspend_calls;
         state_->suspended = true;
 
         if (!state_->arm_ok) {
@@ -73,6 +81,7 @@ public:
 
     void cancel() noexcept override
     {
+        ++state_->cancel_calls;
         state_->cancel_called = true;
     }
 
@@ -145,6 +154,27 @@ TEST_CASE("when_all: all arming failures skip suspension", "[async][when_all]")
     REQUIRE_FALSE(r2.has_value());
     REQUIRE(r1.error() == std::error_code(EAGAIN, std::generic_category()));
     REQUIRE(r2.error() == std::error_code(EAGAIN, std::generic_category()));
+}
+
+TEST_CASE("when_all: ready inner awaiter is not suspended", "[async][when_all]")
+{
+    auto ready = std::make_shared<FakeState>();
+    auto armed = std::make_shared<FakeState>();
+
+    auto awaiter = async::when_all(FakeCancelable{ ready, true, true, 5 }, FakeCancelable{ armed, true });
+
+    REQUIRE(awaiter.await_suspend(std::noop_coroutine()));
+    REQUIRE(ready->suspend_calls == 0);
+    REQUIRE_FALSE(ready->cancel_called);
+    REQUIRE(armed->self != nullptr);
+
+    armed->self->complete(7, 0);
+
+    auto [r_ready, r_armed] = awaiter.await_resume();
+    REQUIRE(r_ready.has_value());
+    REQUIRE(r_armed.has_value());
+    REQUIRE(*r_ready == 5);
+    REQUIRE(*r_armed == 7);
 }
 
 TEST_CASE("when_all: cancel propagates into nested when_any leaves", "[async][when_all][cancel]")

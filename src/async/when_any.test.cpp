@@ -1,3 +1,5 @@
+#include <when_any.h>
+
 #include <cerrno>
 #include <coroutine>
 #include <expected>
@@ -8,7 +10,6 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <when_all.h>
-#include <when_any.h>
 
 namespace {
 
@@ -18,6 +19,10 @@ struct FakeState {
     bool cancel_called{ false };
     bool suspended{ false };
     bool arm_ok{ true };
+    bool ready{ false };
+    int suspend_calls{ 0 };
+    int cancel_calls{ 0 };
+    int ready_result{ 0 };
     async::CancelableOperation* self{ nullptr };
 };
 
@@ -25,22 +30,26 @@ class FakeCancelable final: public async::CancelableOperation {
 public:
     using resume_type = int;
 
-    explicit FakeCancelable(std::shared_ptr<FakeState> state, bool arm_ok = true)
+    explicit FakeCancelable(std::shared_ptr<FakeState> state, bool arm_ok = true, bool ready = false, int ready_result = 0)
       : state_{ std::move(state) }
     {
         state_->arm_ok = arm_ok;
+        state_->ready = ready;
+        state_->ready_result = ready_result;
+        result_ = ready_result;
     }
 
     [[nodiscard]]
     constexpr auto await_ready() const noexcept -> bool
     {
-        return false;
+        return state_->ready;
     }
 
     auto await_suspend(std::coroutine_handle<> handle) noexcept -> bool
     {
         handle_ = handle;
         state_->self = this;
+        ++state_->suspend_calls;
         state_->suspended = true;
 
         if (!state_->arm_ok) {
@@ -73,6 +82,7 @@ public:
 
     void cancel() noexcept override
     {
+        ++state_->cancel_calls;
         state_->cancel_called = true;
     }
 
@@ -151,4 +161,24 @@ TEST_CASE("when_any: arming failure picks winner and cancels armed losers", "[as
     auto result = awaiter.await_resume();
     REQUIRE_FALSE(result.has_value());
     REQUIRE(result.error() == std::error_code(EAGAIN, std::generic_category()));
+}
+
+TEST_CASE("when_any: ready winner is not suspended and only armed losers are canceled", "[async][when_any][cancel]")
+{
+    auto ready_state = std::make_shared<FakeState>();
+    auto loser_state = std::make_shared<FakeState>();
+
+    auto awaiter = async::when_any(FakeCancelable{ ready_state, true, true, 9 }, FakeCancelable{ loser_state, true });
+
+    REQUIRE(awaiter.await_suspend(std::noop_coroutine()));
+    REQUIRE(ready_state->suspend_calls == 0);
+    REQUIRE(ready_state->cancel_calls == 0);
+    REQUIRE(loser_state->cancel_called);
+    REQUIRE(loser_state->self != nullptr);
+
+    loser_state->self->complete(-ECANCELED, 0);
+
+    auto result = awaiter.await_resume();
+    REQUIRE(result.has_value());
+    REQUIRE(*result == 9);
 }

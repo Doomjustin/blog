@@ -96,12 +96,12 @@ IOContext::Scheduler::~Scheduler()
     auto* operation = cross_thread_operations_.pop_all();
     while (operation) {
         auto* next = static_cast<Operation*>(operation->mpsc_next.load(std::memory_order_relaxed));
-        delete operation;
+        operation->complete(-ECANCELED, 0);
         operation = next;
     }
 
     for (auto* pending : local_operations_)
-        delete pending;
+        pending->complete(-ECANCELED, 0);
     local_operations_.clear();
 
     ::io_uring_queue_exit(&ring_);
