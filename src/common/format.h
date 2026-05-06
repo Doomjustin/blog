@@ -5,9 +5,15 @@
 #include <ostream>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <type_traits>
 
 #include <magic_enum/magic_enum.hpp>
+
+inline auto format_as(const std::error_code& ec) -> std::string
+{
+    return ec.message();
+}
 
 template<typename T>
 concept has_format_as = requires(const T& t)
