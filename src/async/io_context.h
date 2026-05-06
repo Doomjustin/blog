@@ -248,7 +248,7 @@ private:
 
         auto sqe() -> ::io_uring_sqe*;
 
-        void schedule();
+        void schedule(const std::atomic_size_t& tracking);
 
         void post(gsl::not_null<Operation*> operation) noexcept
         {

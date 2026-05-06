@@ -22,7 +22,7 @@ void IOContext::run()
             }
         }
 
-        scheduler_.schedule();
+        scheduler_.schedule(tracking_operations_);
     }
 }
 
@@ -121,9 +121,14 @@ auto IOContext::Scheduler::sqe() -> ::io_uring_sqe*
     return sqe;
 }
 
-void IOContext::Scheduler::schedule()
+void IOContext::Scheduler::schedule(const std::atomic_size_t& tracking)
 {
     process_local_operations();
+
+    // If all work finished during local-op processing, don't block in the
+    // kernel — the run() loop will see tracking == 0 and exit cleanly.
+    if (tracking.load(std::memory_order_relaxed) == 0)
+        return;
 
     unsigned wait_for = local_operations_.empty() ? 1 : 0;
     auto res = ::io_uring_submit_and_wait(&ring_, wait_for);
