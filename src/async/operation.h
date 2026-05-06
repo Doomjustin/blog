@@ -24,6 +24,7 @@ struct Operation: public MPSCQueueNode {
     bool is_canceling_{ false };
     
     Operation() = default;
+    
     Operation(Operation&&) = default;
     auto operator=(Operation&&) -> Operation& = default;
 
@@ -61,6 +62,7 @@ struct CancelableOperation : public Operation {
     CancelableOperation* parent{ nullptr };
     
     CancelableOperation() = default;
+
     CancelableOperation(CancelableOperation&&) = default;
     auto operator=(CancelableOperation&&) -> CancelableOperation& = default;
 
