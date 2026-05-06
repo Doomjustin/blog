@@ -1,0 +1,3 @@
+add_executable(tutorial.11_error_handling main.cpp)
+target_link_libraries(tutorial.11_error_handling blog)
+target_compile_features(tutorial.11_error_handling PRIVATE cxx_std_23)
