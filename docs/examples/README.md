@@ -19,7 +19,7 @@
 13. [13_when_all](13_when_all.md)
 14. [14_when_any](14_when_any.md)
 15. [15_all](15_all.md)
-16. [16_race](16_race.md)
+16. [16_any](16_any.md)
 17. [17_error_taxonomy](17_error_taxonomy.md)
 18. [18_timeout_vs_stop_then](18_timeout_vs_stop_then.md)
 19. [19_graceful_shutdown_server](19_graceful_shutdown_server.md)
@@ -56,7 +56,7 @@
 - [13_when_all](13_when_all.md): 并发等待全部完成，返回 tuple。
 - [14_when_any](14_when_any.md): 并发竞争首个完成，取消其余分支。
 - [15_all](15_all.md): `Task<>` 级别的高层并行聚合封装。
-- [16_race](16_race.md): 首个完成后请求停止其余任务（协作式取消）。
+- [16_any](16_any.md): 首个完成后请求停止其余任务（协作式取消）。
 
 ### 错误处理与生产化
 
@@ -70,6 +70,6 @@
 - 需要“底层 operation 结果聚合（tuple<expected...>）”：优先看 `when_all`。
 - 需要“Task 级并发并等待全部结束”：优先看 `all`。
 - 需要“底层 operation 竞争首个完成”：优先看 `when_any`。
-- 需要“Task 级首个完成并协作式取消其余任务”：优先看 `race`。
+- 需要“Task 级首个完成并协作式取消其余任务”：优先看 `any`。
 - 需要可取消 I/O：从 `stop_then` 系列（10/11/12）开始。
 - 需要高吞吐 I/O：先看 `scatter_gather` 与 `zero_copy_send`。

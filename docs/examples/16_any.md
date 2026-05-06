@@ -1,8 +1,8 @@
-# 16. 并发竞速与协作取消（race）
+# 16. 并发竞速与协作取消（any）
 
-> **源文件**：[examples/race/main.cpp](../../examples/race/main.cpp)
+> **源文件**：[examples/any/main.cpp](../../examples/any/main.cpp)
 
-当业务目标是“先到先得”时，`race` 是直接的任务级方案。
+当业务目标是“先到先得”时，`any` 是直接的任务级方案。
 
 典型场景：
 
@@ -12,7 +12,7 @@
 ## 示例写法
 
 ```cpp
-co_await async::race(
+co_await async::any(
     async::task(simple_worker, "task-A", 120ms),
     async::task(simple_worker_front, "task-B", 400ms),
     async::task(simple_worker, "task-C", 260ms)
@@ -21,7 +21,7 @@ co_await async::race(
 
 ## 生效前提
 
-`race` 只负责发出 stop 请求；落败任务能不能“很快停下来”，取决于任务内部是否有取消点。
+`any` 只负责发出 stop 请求；落败任务能不能“很快停下来”，取决于任务内部是否有取消点。
 
 本例中 `simple_worker` 每 20ms 调一次：
 
@@ -41,13 +41,13 @@ co_await async::stop_then(async::sleep_for(step), token);
 
 ## 与 when_any 的选择建议
 
-1. `race`：Task 级别编排，关注业务任务收敛。
+1. `any`：Task 级别编排，关注业务任务收敛。
 2. `when_any`：operation 级别组合，关注底层 awaiter 结果。
 
 ## 运行
 
 ```bash
-example.race
+example.any
 ```
 
 实际输出：
@@ -59,7 +59,7 @@ example.race
 [2026-05-06 18:46:07.677] [104657] [info] task-A: completed
 [2026-05-06 18:46:07.677] [104657] [info] task-B: cancelled
 [2026-05-06 18:46:07.677] [104657] [info] task-C: cancelled
-[2026-05-06 18:46:07.677] [104657] [info] race done (elapsed 120ms)
+[2026-05-07 03:32:05.372] [258061] [info] any done (elapsed 120ms)
 ```
 
 ## 下一步

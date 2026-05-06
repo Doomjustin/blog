@@ -9,7 +9,7 @@ using namespace std::chrono_literals;
 
 auto simple_worker(const char* name,
                    std::chrono::milliseconds work_time,
-                   std::stop_token& token) -> async::Task<>
+                   std::stop_token token) -> async::Task<>
 {
     log::info("{}: started", name);
 
@@ -40,7 +40,7 @@ auto run() -> async::Task<>
 {
     auto start = std::chrono::steady_clock::now();
 
-    co_await async::race(
+    co_await async::any(
         async::task(simple_worker, "task-A", 120ms),
         async::task(simple_worker, "task-B", 400ms),
         async::task(simple_worker, "task-C", 260ms)
@@ -48,7 +48,7 @@ auto run() -> async::Task<>
 
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - start);
-    log::info("race done (elapsed {}ms)", elapsed.count());
+    log::info("any done (elapsed {}ms)", elapsed.count());
 }
 
 } // namespace

@@ -32,10 +32,10 @@ auto result = co_await async::when_any(
 
 如果换成异构分支（不同返回类型），返回会变成 variant 形式，按 index 区分胜出者。
 
-## 与 race 的选择建议
+## 与 any 的选择建议
 
 1. `when_any`：更偏 operation 组合层，直接返回 operation 结果。
-2. `race`：更偏 Task 编排层，依赖任务内部取消点。
+2. `any`：更偏 Task 编排层，依赖任务内部取消点。
 
 ## 运行
 

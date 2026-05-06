@@ -105,6 +105,10 @@ int main()
 - 韧性请求： [stop_then_resilient](docs/examples/12_stop_then_resilient.md)
 - 生产骨架： [graceful_shutdown_server](docs/examples/19_graceful_shutdown_server.md)
 
+## 教程
+
+逐步学习 io_uring + C++23 协程网络编程：[docs/tutorial/README.md](docs/tutorial/README.md)
+
 ## 博客
 
 记录了这个库从零搭建的全过程：
