@@ -19,11 +19,11 @@ target_link_libraries(blog_common
 
 if (blog_BUILD_TESTS AND BLOG_COMMON_TEST_SOURCE)
     include(Catch)
-    add_executable(blog.test.common ${BLOG_COMMON_TEST_SOURCE})
-    target_link_libraries(blog.test.common
+    add_executable(tests.common ${BLOG_COMMON_TEST_SOURCE})
+    target_link_libraries(tests.common
         PRIVATE
             blog::common
             Catch2::Catch2WithMain
     )
-    catch_discover_tests(blog.test.common)
+    catch_discover_tests(tests.common)
 endif()

@@ -3,6 +3,7 @@
 
 #include <coroutine>
 #include <expected>
+#include <type_traits>
 
 #include <liburing.h>
 
@@ -23,7 +24,7 @@ namespace net {
 template<typename Protocol>
 class AcceptAwaiter: public async::CancelableOperation {
 public:
-    using is_single_shot = void;
+    using is_single_shot = std::true_type;
     using socket_type = typename Protocol::socket;
     using endpoint_type = typename Protocol::endpoint;
     using context_type = async::IOContext;
@@ -51,15 +52,21 @@ public:
         return false;
     }
 
-    void await_suspend(std::coroutine_handle<> handle) noexcept
+    auto await_suspend(std::coroutine_handle<> handle) noexcept -> bool
     {
         handle_ = handle;
 
         auto* sqe = context_->sqe();
+        if (!sqe) {
+            error_code_ = EAGAIN;
+            return false;
+        }
+
         prepare(sqe);
         ::io_uring_sqe_set_data(sqe, this);
 
         context().track(this);
+        return true;
     }
 
     auto await_resume() noexcept -> std::expected<resume_type, std::error_code>
@@ -97,6 +104,11 @@ public:
             peer_->resize(addrlen_);
 
         this->resume(handle_, result, flags);
+    }
+
+    void cancel() noexcept override
+    {
+        context().cancel(this);
     }
 
     auto context() noexcept -> context_type& { return *context_; }

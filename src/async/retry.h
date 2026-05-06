@@ -10,7 +10,7 @@
 #include <exceptions.h>
 #include <operation.h>
 #include <sleep_for.h>
-#include <timeout_awaiter.h>
+#include <timeout.h>
 
 namespace async {
 
@@ -110,6 +110,17 @@ public:
             --retries_left_;
             start_delay();
         }
+    }
+
+    void cancel() noexcept override
+    {
+        is_canceling_ = true;
+
+        if (state_ == State::IoRunning && io_awaiter_)
+            io_awaiter_->cancel();
+
+        if (state_ == State::Delaying && delay_awaiter_)
+            delay_awaiter_->cancel();
     }
 
     auto context() noexcept -> context_type&

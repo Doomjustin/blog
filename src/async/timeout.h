@@ -1,11 +1,12 @@
-#ifndef BLOG_ASYNC_TIMEOUT_AWAITER_H
-#define BLOG_ASYNC_TIMEOUT_AWAITER_H
+#ifndef BLOG_ASYNC_TIMEOUT_H
+#define BLOG_ASYNC_TIMEOUT_H
 
 #include <cerrno>
 #include <chrono>
 #include <coroutine>
 #include <cstdint>
 #include <expected>
+#include <type_traits>
 #include <utility>
 
 #include <liburing.h>
@@ -28,7 +29,7 @@ namespace async {
  *
  * @tparam InnerOperation Operation type satisfying `single_shot_only_operation`.
  */
-template<single_shot_only_operation InnerOperation>
+template<single_shot_operation InnerOperation>
 class TimeoutAwaiter: public Operation {
 public:
     using resume_type = typename InnerOperation::resume_type;
@@ -46,8 +47,9 @@ public:
     {
         using namespace std::chrono;
 
-        timeout_.tv_sec = duration_cast<seconds>(timeout).count();
-        timeout_.tv_nsec = duration_cast<nanoseconds>(timeout % 1s).count();
+        auto ns = duration_cast<nanoseconds>(timeout).count();
+        timeout_.tv_sec = ns / 1'000'000'000;
+        timeout_.tv_nsec = ns % 1'000'000'000;
     }
 
     [[nodiscard]]
@@ -56,12 +58,16 @@ public:
         return false;
     }
 
-    void await_suspend(std::coroutine_handle<> handle) noexcept
+    auto await_suspend(std::coroutine_handle<> handle) noexcept -> bool
     {
         handle_ = handle;
 
         auto* io_sqe = context().sqe();
         auto* timeout_sqe = context().sqe();
+        if (!io_sqe || !timeout_sqe) {
+            result_ = -EAGAIN;
+            return false;
+        }
 
         inner_operation_.prepare(io_sqe);
         io_sqe->flags |= IOSQE_IO_LINK;
@@ -71,6 +77,7 @@ public:
         ::io_uring_sqe_set_data(timeout_sqe, this);
 
         context().track(this);
+        return true;
     }
 
     auto await_resume() noexcept -> std::expected<resume_type, std::error_code>
@@ -78,7 +85,12 @@ public:
         if (is_timed_out_)
             return unexpected_system_error(std::errc::timed_out);
 
-        inner_operation_.set_result(result_, 0);
+        if (result_ < 0)
+            return unexpected_system_error(-result_);
+
+        if constexpr (!std::is_void_v<resume_type>)
+            inner_operation_.set_result(result_, 0);
+
         return inner_operation_.await_resume();
     }
 
@@ -128,7 +140,7 @@ private:
  * - index 1 (sleep wins) → return `std::errc::timed_out`.
  */
 template<cancelable_operation Op>
-class TimeoutWrapper {
+class TimeoutWrapper: public CancelableOperation {
 public:
     using resume_type = typename Op::resume_type;
 
@@ -139,9 +151,11 @@ public:
     [[nodiscard]]
     constexpr auto await_ready() const noexcept -> bool { return false; }
 
-    void await_suspend(std::coroutine_handle<> handle) noexcept
+    auto await_suspend(std::coroutine_handle<> handle) noexcept -> bool
     {
-        inner_.await_suspend(handle);
+        handle_ = handle;
+        inner_.parent = this;
+        return inner_.await_suspend(handle);
     }
 
     auto await_resume() -> std::expected<resume_type, std::error_code>
@@ -154,8 +168,19 @@ public:
 
     auto context() noexcept -> decltype(auto) { return inner_.context(); }
 
+    void complete(int result, std::uint32_t flags) noexcept override
+    {
+        this->resume(handle_, result, flags);
+    }
+
+    void cancel() noexcept override
+    {
+        inner_.cancel();
+    }
+
 private:
     WhenAnyAwaiter<Op, TimerAwaier> inner_;
+    std::coroutine_handle<> handle_;
 };
 
 
@@ -172,7 +197,7 @@ private:
  * @param operation  Operation to wrap with timeout behavior.
  * @param dur        Timeout duration.
  */
-template<single_shot_only_operation Operation, chrono_duration Duration>
+template<single_shot_operation Operation, chrono_duration Duration>
 auto timeout(Operation&& operation, Duration dur)
 {
     return TimeoutAwaiter<std::decay_t<Operation>>{ std::forward<Operation>(operation), dur };
@@ -197,7 +222,7 @@ auto timeout(Operation&& operation, Duration dur)
  * @endcode
  */
 template<cancelable_operation Operation, chrono_duration Duration>
-    requires (!single_shot_only_operation<Operation>)
+    requires (!single_shot_operation<Operation>)
 auto timeout(Operation&& operation, Duration dur)
 {
     auto& ctx = operation.context();
@@ -206,4 +231,4 @@ auto timeout(Operation&& operation, Duration dur)
 
 } // namespace async
 
-#endif // BLOG_ASYNC_TIMEOUT_AWAITER_H    
+#endif // BLOG_ASYNC_TIMEOUT_H

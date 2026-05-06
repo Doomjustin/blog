@@ -80,8 +80,8 @@ public:
         ::sigemptyset(&mask_);
         (::sigaddset(&mask_, sigal), ...);
 
-        if (::pthread_sigmask(SIG_BLOCK, &mask_, nullptr) == -1)
-            throw_system_error("Failed to block signals");
+        if (auto err = ::pthread_sigmask(SIG_BLOCK, &mask_, nullptr); err != 0)
+            throw_system_error(err, "Failed to block signals");
 
         fd_ = ::signalfd(-1, &mask_, SFD_NONBLOCK | SFD_CLOEXEC);
         if (fd_ == -1)

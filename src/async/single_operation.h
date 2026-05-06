@@ -2,6 +2,7 @@
 #define BLOG_ASYNC_SINGLE_OPERATION_H
 
 #include <expected>
+#include <type_traits>
 
 #include <exceptions.h>
 #include <io_context.h>
@@ -35,7 +36,7 @@ namespace async {
 template<typename Derived, typename ResumeType>
 class SingleOperation: public CancelableOperation {
 public:
-    using is_single_shot = void;
+    using is_single_shot = std::true_type;
     using resume_type = ResumeType;
     using context_type = IOContext;
 
@@ -118,6 +119,11 @@ public:
         this->resume(handle_, result, flags);
     }
 
+    void cancel() noexcept override
+    {
+        context_->cancel(this);
+    }
+
     auto context() noexcept -> context_type&
     {
         return *context_;
@@ -133,12 +139,15 @@ protected:
 /**
  * @brief Constrain inner operations that can be wrapped with timeout semantics.
  *
- * An operation satisfies this concept by exposing `using is_single_shot = void`
- * inside the class, which is provided automatically by the
+ * An operation satisfies this concept by exposing
+ * `using is_single_shot = std::true_type` inside the class, which is provided automatically by the
  * `SingleOperation<Derived, ResumeType>` CRTP base.
  */
 template<typename T>
-concept single_shot_only_operation = requires { typename T::is_single_shot; };
+concept single_shot_operation = requires {
+    typename T::is_single_shot;
+    requires std::same_as<typename T::is_single_shot, std::true_type>;
+};
 
 } // namespace async
 

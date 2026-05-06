@@ -140,7 +140,7 @@ public:
      */
     void add_work() noexcept
     {
-        ++tracking_operations_;
+        tracking_operations_.fetch_add(1, std::memory_order_relaxed);
     }
 
     /**
@@ -151,8 +151,8 @@ public:
      */
     void drop_work() noexcept
     {
-        assert(tracking_operations_ > 0);
-        --tracking_operations_;
+        auto prev = tracking_operations_.fetch_sub(1, std::memory_order_relaxed);
+        assert(prev > 0);
     }
 
     /**
@@ -262,6 +262,13 @@ private:
         }
 
     private:
+        struct PendingEvent {
+            bool is_wakeup{ false };
+            Operation* operation{ nullptr };
+            int result{ 0 };
+            std::uint32_t flags{ 0 };
+        };
+
         static constexpr auto WAKEUP_MARKER = std::numeric_limits<std::uintptr_t>::max();
 
         ::io_uring ring_;
@@ -278,6 +285,10 @@ private:
         void process_cross_thread_operations() noexcept;
 
         void process_local_operations() noexcept;
+
+        void collect_cqe_events(std::vector<PendingEvent>& pending_events, unsigned& count) noexcept;
+
+        void dispatch_cqe_events(std::vector<PendingEvent>& pending_events) noexcept;
     };
 
     class BufferRingGroup {
@@ -336,7 +347,7 @@ private:
     Operation* head_{ nullptr };
     Operation* tail_{ nullptr };
     std::thread::id thread_id_{ std::this_thread::get_id() };
-    std::size_t tracking_operations_{ 0 };
+    std::atomic<std::size_t> tracking_operations_{ 0 };
     std::atomic<bool> should_stop_{ false };
 };
 

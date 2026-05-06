@@ -1,48 +1,52 @@
+#include <array>
 #include <cstdlib>
+#include <system_error>
+
+#include "this_coroutine.h"
 
 #include <blog.h>
 
 static constexpr std::string_view response = "HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\nHello, World!";
 
-constexpr auto should_ignore(std::error_code& ec) -> bool
+constexpr auto is_peer_shutdown(const std::error_code& ec) -> bool
 {
     return ec == std::errc::connection_reset || 
            ec == std::errc::broken_pipe ||
            ec == std::errc::connection_aborted ||
-           ec == std::errc::operation_canceled ||
-           ec == std::errc::no_buffer_space;
+           ec == std::errc::operation_canceled;
 }
 
 auto session(net::ip::tcp::socket socket) -> async::Task<>
 {
     socket.option(net::ip::tcp::socket::no_delay(true));
 
-    auto stream = socket.receive_stream();
+    std::array<std::byte, 1024> buffer{};
+
     while (true) {
-        auto read_result = co_await stream.next();
+        auto read_result = co_await socket.async_receive_some(buffer);
         if (!read_result) {
-            if (!should_ignore(read_result.error()))
+            if (!is_peer_shutdown(read_result.error()))
                 log::error("Failed to read from client: {}", read_result.error());
 
-            break;
+            co_return;
         }
 
-        if (read_result->data().empty())
+        if (*read_result == 0)
             co_return;
 
         auto bytes_written = co_await net::send(socket, async::buffer(response));
         if (!bytes_written) {
-            if (!should_ignore(bytes_written.error()))
+            if (!is_peer_shutdown(bytes_written.error()))
                 log::error("Failed to write to client: {}", bytes_written.error());
 
-            break;
+            co_return;
         }
     }
 }
 
 auto http() -> async::Task<>
 {
-    async::this_coroutine::setup_buffer_ring(1024);
+    async::this_coroutine::setup_entries(4096);
 
     auto endpoint = net::ip::tcp::endpoint{ net::ip::AddressV4::loopback(), 12345 };
     auto acceptor = net::ip::tcp::acceptor{ endpoint, true };

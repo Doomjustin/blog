@@ -2,6 +2,7 @@
 #define BLOG_NET_SEND_ZC_AWAITER_H
 
 #include <cstddef>
+#include <type_traits>
 
 #include <liburing.h>
 
@@ -20,6 +21,8 @@ namespace net {
  */
 class SendZCAwaiter: public async::SingleOperation<SendZCAwaiter, std::size_t> {
 public:
+    using is_single_shot = std::false_type;
+
     /**
      * @brief Construct with target fd and source buffer.
      *

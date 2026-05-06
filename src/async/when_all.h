@@ -59,11 +59,11 @@ public:
      * Completions are routed through `CancelableOperation::resume()` to
      * `WhenAllAwaiter::complete()`, which counts down until all N CQEs arrive.
      */
-    void await_suspend(std::coroutine_handle<> handle) noexcept
+    auto await_suspend(std::coroutine_handle<> handle) noexcept -> bool
     {
         handle_ = handle;
         setup_parents(std::index_sequence_for<Awaiters...>{});
-        arm_all(std::index_sequence_for<Awaiters...>{});
+        return arm_all(std::index_sequence_for<Awaiters...>{});
     }
 
     /**
@@ -88,6 +88,11 @@ public:
             this->resume(handle_, result, flags);
     }
 
+    void cancel() noexcept override
+    {
+        cancel_all(std::index_sequence_for<Awaiters...>{});
+    }
+
     auto context() noexcept -> decltype(auto)
     {
         return std::get<0>(awaiters_).context();
@@ -105,15 +110,34 @@ private:
     }
 
     template<std::size_t... Is>
-    void arm_all(std::index_sequence<Is...> /*index*/) noexcept
+    auto arm_all(std::index_sequence<Is...> /*index*/) noexcept -> bool
     {
-        (..., (void)std::get<Is>(awaiters_).await_suspend(handle_));
+        bool any_armed = false;
+        (..., arm_one<Is>(any_armed));
+        return any_armed;
+    }
+
+    template<std::size_t I>
+    void arm_one(bool& any_armed) noexcept
+    {
+        if (std::get<I>(awaiters_).await_suspend(handle_)) {
+            any_armed = true;
+            return;
+        }
+
+        --pending_;
     }
 
     template<std::size_t... Is>
     auto collect(std::index_sequence<Is...> /*index*/) -> resume_type
     {
         return resume_type{ std::get<Is>(awaiters_).await_resume()... };
+    }
+
+    template<std::size_t... Is>
+    void cancel_all(std::index_sequence<Is...> /*index*/) noexcept
+    {
+        (..., std::get<Is>(awaiters_).cancel());
     }
 };
 

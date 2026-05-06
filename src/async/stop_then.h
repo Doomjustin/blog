@@ -14,7 +14,7 @@
 
 namespace async {
 
-template<single_shot_only_operation Op>
+template<single_shot_operation Op>
 class StopTokenWrapper: public CancelableOperation {
 public:
     using resume_type = typename Op::resume_type;
@@ -23,6 +23,12 @@ public:
       : inner_{ std::forward<Op>(op) },
         stop_token_{ std::move(token) }
     {}
+
+    ~StopTokenWrapper() override
+    {
+        *alive_ = false;
+        stop_callback_.reset();
+    }
 
     [[nodiscard]]
     auto await_ready() noexcept -> bool
@@ -35,14 +41,15 @@ public:
     {
         handle_ = handle;
         inner_.parent = this;
-        inner_.await_suspend(handle);
 
         stop_callback_.emplace(std::move(stop_token_), 
             [alive = alive_, &ctx = inner_.context(), target = &inner_]() mutable -> void {
                 post(ctx, [alive = std::move(alive), &ctx, target] {
-                    if (*alive) ctx.cancel(target);
+                    if (*alive) target->cancel();
                 });
         });
+        
+        inner_.await_suspend(handle);
     }
 
     auto await_resume() -> std::expected<resume_type, std::error_code>
@@ -75,6 +82,11 @@ public:
         this->resume(handle_, result, flags);
     }
 
+    void cancel() noexcept override
+    {
+        inner_.cancel();
+    }
+
 private:
     Op inner_;
     std::stop_token stop_token_;
@@ -88,7 +100,7 @@ private:
 };
 
 
-template<single_shot_only_operation Op>
+template<single_shot_operation Op>
 auto stop_then(Op&& operation, std::stop_token token)
 {
     return StopTokenWrapper<std::decay_t<Op>>{ std::forward<Op>(operation), std::move(token) };

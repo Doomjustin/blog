@@ -18,11 +18,11 @@ target_link_libraries(blog_net
 
 if (blog_BUILD_TESTS AND BLOG_NET_TEST_SOURCE)
     include(Catch)
-    add_executable(blog.test.net ${BLOG_NET_TEST_SOURCE})
-    target_link_libraries(blog.test.net
+    add_executable(tests.net ${BLOG_NET_TEST_SOURCE})
+    target_link_libraries(tests.net
         PRIVATE
             blog::net
             Catch2::Catch2WithMain
     )
-    catch_discover_tests(blog.test.net)
+    catch_discover_tests(tests.net)
 endif()

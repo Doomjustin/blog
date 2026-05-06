@@ -89,11 +89,11 @@ public:
      * routes the result to `Slot::complete()`, which calls back into
      * `WhenAnyAwaiter::on_slot_complete()` with the index.
      */
-    void await_suspend(std::coroutine_handle<> handle) noexcept
+    auto await_suspend(std::coroutine_handle<> handle) noexcept -> bool
     {
         handle_ = handle;
         set_parents(std::index_sequence_for<Awaiters...>{});
-        arm_all(std::index_sequence_for<Awaiters...>{});
+        return arm_all(std::index_sequence_for<Awaiters...>{});
     }
 
     /**
@@ -118,6 +118,11 @@ public:
      */
     void complete(int /*result*/, std::uint32_t /*flags*/) noexcept override {}
 
+    void cancel() noexcept override
+    {
+        cancel_all(std::index_sequence_for<Awaiters...>{});
+    }
+
     auto context() noexcept -> decltype(auto)
     {
         return std::get<0>(awaiters_).context();
@@ -138,6 +143,11 @@ private:
         void complete(int result, std::uint32_t flags) noexcept override
         {
             owner->on_slot_complete(index, result, flags);
+        }
+
+        void cancel() noexcept override
+        {
+            owner->cancel();
         }
     };
 
@@ -160,9 +170,29 @@ private:
     }
 
     template<std::size_t... Is>
-    void arm_all(std::index_sequence<Is...> /*index*/) noexcept
+    auto arm_all(std::index_sequence<Is...> /*index*/) noexcept -> bool
     {
-        (..., (void)std::get<Is>(awaiters_).await_suspend(handle_));
+        bool any_armed = false;
+        (..., arm_one<Is>(any_armed));
+
+        if (winner_ >= 0)
+            cancel_losers(static_cast<std::size_t>(winner_), std::index_sequence_for<Awaiters...>{});
+
+        return any_armed;
+    }
+
+    template<std::size_t I>
+    void arm_one(bool& any_armed) noexcept
+    {
+        if (std::get<I>(awaiters_).await_suspend(handle_)) {
+            any_armed = true;
+            return;
+        }
+
+        if (winner_ < 0)
+            winner_ = static_cast<int>(I);
+
+        --pending_;
     }
 
     void on_slot_complete(std::size_t index, int result, std::uint32_t flags) noexcept
@@ -182,7 +212,13 @@ private:
     template<std::size_t... Is>
     void cancel_losers(std::size_t winner, std::index_sequence<Is...> /*index*/) noexcept
     {
-        (..., (void)(Is != winner && (context().cancel(&std::get<Is>(awaiters_)), true)));
+        (..., (void)(Is != winner && (std::get<Is>(awaiters_).cancel(), true)));
+    }
+
+    template<std::size_t... Is>
+    void cancel_all(std::index_sequence<Is...> /*index*/) noexcept
+    {
+        (..., std::get<Is>(awaiters_).cancel());
     }
 
     // Homogeneous path: all resume_types identical, return expected<R> directly.

@@ -67,6 +67,14 @@ struct CancelableOperation : public Operation {
     virtual ~CancelableOperation() = default;
 
     /**
+     * @brief Request cancellation for this operation.
+     *
+     * Leaf awaiters should forward to `IOContext::cancel(this)`. Combinators
+     * should recursively cancel all in-flight children.
+     */
+    virtual void cancel() noexcept = 0;
+
+    /**
      * @brief Route a completion event to the parent combinator or resume directly.
      *
      * Called by derived classes from `complete()` instead of resuming the
@@ -106,6 +114,7 @@ concept cancelable_operation = requires(T& t)
 
     requires std::is_lvalue_reference_v<decltype(t.context())>;
     t.await_suspend(std::coroutine_handle<>());
+    t.cancel();
 };
 
 } // namespace async

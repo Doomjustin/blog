@@ -22,6 +22,8 @@ const auto response_ok = [] {
     return header + body;
 }();
 
+constexpr std::string_view response = "HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\nHello, World!";
+
 auto is_peer_shutdown(const asio::error_code& ec) -> bool
 {
     return ec == asio::error::eof ||
@@ -94,8 +96,15 @@ auto session(tcp::socket socket) -> awaitable<void>
 {
     std::array<char, 1024> buffer{};
 
+    asio::error_code ec;
+    socket.set_option(tcp::no_delay(true), ec);
+    if (ec) {
+        spdlog::error("Failed to enable TCP_NODELAY: {}", ec.message());
+        co_return;
+    }
+
     while (true) {
-        asio::error_code ec;
+        ec.clear();
         co_await socket.async_read_some(
             asio::buffer(buffer),
             asio::redirect_error(use_awaitable, ec));
@@ -109,7 +118,7 @@ auto session(tcp::socket socket) -> awaitable<void>
 
         co_await asio::async_write(
             socket,
-            asio::buffer(response_ok),
+            asio::buffer(response),
             asio::redirect_error(use_awaitable, ec));
 
         if (ec) {

@@ -96,6 +96,11 @@ public:
         finish_or_rearm(result, flags);
     }
 
+    void cancel() noexcept override
+    {
+        context_->cancel(this);
+    }
+
     auto context() noexcept -> context_type&
     {
         return *context_;

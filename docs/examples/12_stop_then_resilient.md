@@ -137,7 +137,9 @@ auto server(std::uint16_t& out_port, std::stop_token stop) -> async::Task<>
 
 `server` 以 `co_spawn` 在后台运行，事件循环会等待**所有 task** 完成才退出。如果 server 的 `while (true)` 不感知 stop，client 退出后 `demo()` 返回，进程却永远挂着——server 仍在 `async_accept` 里等待新连接。
 
-解决方法：同一个 stop token 传给 server，`acceptor.async_accept()` 收到 stop 后返回 `operation_canceled`，server 检测到后 `co_return`，事件循环中的所有 task 都结束，进程退出。
+> 暂时的解决方法：同一个 stop token 传给 server，`acceptor.async_accept()` 收到 stop 后返回 `operation_canceled`，server 检测到后 `co_return`，事件循环中的所有 task 都结束，进程退出。
+
+> 待推出方案：async::scope()来处理自动退出的
 
 ## 运行
 

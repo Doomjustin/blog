@@ -11,7 +11,7 @@ namespace async {
 
 void IOContext::run()
 {
-    while (tracking_operations_ > 0) {
+    while (tracking_operations_.load(std::memory_order_relaxed) > 0) {
         // 如果用户调用了stop()，就取消所有未完成的操作
         if (should_stop_.load(std::memory_order_relaxed)) {
             auto* current = head_;
@@ -92,6 +92,17 @@ IOContext::Scheduler::Scheduler(unsigned entries)
 
 IOContext::Scheduler::~Scheduler()
 {
+    auto* operation = cross_thread_operations_.pop_all();
+    while (operation) {
+        auto* next = static_cast<Operation*>(operation->mpsc_next.load(std::memory_order_relaxed));
+        delete operation;
+        operation = next;
+    }
+
+    for (auto* pending : local_operations_)
+        delete pending;
+    local_operations_.clear();
+
     ::io_uring_queue_exit(&ring_);
     ::close(wakeup_fd_);
 }
@@ -120,30 +131,58 @@ void IOContext::Scheduler::schedule()
 
         throw_system_error("io_uring_submit_and_wait");
     }
-        
-    unsigned head;
-    unsigned count{ 0 };
 
+    static thread_local std::vector<PendingEvent> pending_events;
+
+    pending_events.clear();
+    const auto cq_ready = ::io_uring_cq_ready(&ring_);
+    if (pending_events.capacity() < cq_ready)
+        pending_events.reserve(cq_ready);
+
+    unsigned count{ 0 };
+    collect_cqe_events(pending_events, count);
+
+    if (count > 0)
+        ::io_uring_cq_advance(&ring_, count);
+
+    dispatch_cqe_events(pending_events);
+}
+
+void IOContext::Scheduler::collect_cqe_events(std::vector<PendingEvent>& pending_events, unsigned& count) noexcept
+{
+    unsigned head;
     io_uring_for_each_cqe(&ring_, head, cqe_) {
         ++count;
 
         if (::io_uring_cqe_get_data64(cqe_) == WAKEUP_MARKER) {
-            resume_wakeup();
-
-            process_cross_thread_operations();
-
-            arm_wakeup();
+            pending_events.push_back(PendingEvent{ .is_wakeup = true });
             continue;
         }
 
         if (::io_uring_cqe_get_data64(cqe_) != 0) {
             auto* op = static_cast<Operation*>(::io_uring_cqe_get_data(cqe_));
-            op->complete(cqe_->res, cqe_->flags);
+            pending_events.push_back(PendingEvent{
+                .is_wakeup = false,
+                .operation = op,
+                .result = cqe_->res,
+                .flags = cqe_->flags,
+            });
         }
     }
+}
 
-    if (count > 0)
-        ::io_uring_cq_advance(&ring_, count);
+void IOContext::Scheduler::dispatch_cqe_events(std::vector<PendingEvent>& pending_events) noexcept
+{
+    for (auto& event : pending_events) {
+        if (event.is_wakeup) {
+            resume_wakeup();
+            process_cross_thread_operations();
+            arm_wakeup();
+            continue;
+        }
+
+        event.operation->complete(event.result, event.flags);
+    }
 }
 
 void IOContext::Scheduler::wakeup()
@@ -180,7 +219,10 @@ void IOContext::Scheduler::process_cross_thread_operations() noexcept
 
 void IOContext::Scheduler::process_local_operations() noexcept
 {
-    for (auto* operation : local_operations_)
+    std::vector<Operation*> pending_operations;
+    pending_operations.swap(local_operations_);
+
+    for (auto* operation : pending_operations)
         operation->complete(0, 0);
     
     local_operations_.clear();
