@@ -28,7 +28,7 @@ struct ScopeState {
     IOContext* context_;
     std::stop_source stop_source_;
     std::stop_source drained_;
-    std::atomic_size_t pending_{ 0 };
+    std::atomic_size_t pending_{ 1 }; // 1 sentinel: released by join()
 };
 
 template<typename Awaitable>
@@ -50,7 +50,7 @@ public:
 
     Scope(const Scope&) = delete;
     auto operator=(const Scope&) -> Scope& = delete;
-    
+
     Scope(Scope&&) noexcept = default;
     auto operator=(Scope&&) noexcept -> Scope& = default;
 
@@ -88,7 +88,9 @@ public:
     {
         closed_ = true;
 
-        if (state_->pending_.load(std::memory_order_acquire) == 0)
+        // Release the sentinel count. If we transition 1 → 0 all spawned tasks
+        // already finished (or none were spawned), so we are done immediately.
+        if (state_->pending_.fetch_sub(1, std::memory_order_acq_rel) == 1)
             co_return;
 
         co_await StopRequestedAwaiter(state_->drained_.get_token());
