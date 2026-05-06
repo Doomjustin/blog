@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <co_spawn.h>
+#include <task.h>
 #include <this_coroutine.h>
 
 namespace async {
@@ -94,6 +95,61 @@ void run(std::integral auto thread_count, Awaiter&& awaiter, Args&&... args)
     }
 
     run(std::forward<Awaiter>(awaiter), std::forward<Args>(args)...);
+}
+
+/**
+ * @brief Start the event loop with a stop_token-aware entry point.
+ *
+ * The awaiter is invoked with the `stop_token` from the provided `stop_source`
+ * as its only argument. This simplifies patterns like `async::stop_then` by
+ * automatically passing the token without manual lifecycle management.
+ *
+ * Example:
+ * ```cpp
+ * std::stop_source source;
+ * async::run(source, [](std::stop_token token) -> async::Task<> {
+ *     co_await async::stop_then(async::sleep_for(3s), token);
+ * });
+ * ```
+ *
+ * @tparam Awaiter  Callable that accepts `std::stop_token` and returns an awaitable.
+ * @param source    The `stop_source` whose token is passed to the awaiter.
+ * @param awaiter   Function/lambda that takes a `std::stop_token` parameter.
+ */
+template<typename Awaiter>
+    requires std::copy_constructible<Awaiter>
+void run(std::stop_source& source, Awaiter&& awaiter)
+{
+    auto coro = [token = source.get_token(), f = std::forward<Awaiter>(awaiter)]() mutable -> Task<>
+    {
+        co_await std::invoke(f, token);
+    };
+    
+    run(coro);
+}
+
+/**
+ * @brief Start the event loop on `thread_count` threads with stop_token support.
+ *
+ * Similar to the stop_source-aware single-threaded version, but spawns
+ * the entry point on `thread_count` threads. The `stop_source` is shared
+ * across all threads.
+ *
+ * @tparam Awaiter      Callable that accepts `std::stop_token` and returns an awaitable.
+ * @param thread_count  Total number of worker threads (including the caller).
+ * @param source        The `stop_source` whose token is passed to the awaiter.
+ * @param awaiter       Function/lambda that takes a `std::stop_token` parameter.
+ */
+template<typename Awaiter>
+    requires std::copy_constructible<Awaiter>
+void run(std::integral auto thread_count, std::stop_source& source, Awaiter&& awaiter)
+{
+    auto coro = [token = source.get_token(), f = std::forward<Awaiter>(awaiter)]() mutable -> Task<>
+    {
+        co_await std::invoke(f, token);
+    };
+    
+    run(thread_count, coro);
 }
 
 /**
