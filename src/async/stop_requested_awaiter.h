@@ -55,13 +55,14 @@ public:
             token_, [state, context] {
                 // Bounce the resume onto the event loop to avoid synchronous
                 // stop_callback execution resuming the coroutine twice.
+                // always=true: resume must happen even during context teardown.
                 post(*context, [state] {
                     if (state->alive.load(std::memory_order_acquire)) {
                         auto h = std::exchange(state->handle, std::coroutine_handle<>{});
                         if (h)
                             h.resume();
                     }
-                });
+                }, /*always=*/true);
             });
         return true;
     }

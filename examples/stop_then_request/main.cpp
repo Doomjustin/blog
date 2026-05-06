@@ -31,14 +31,16 @@ auto echo_server(std::uint16_t& out_port) -> async::Task<>
     if (auto ep = local_endpoint(acceptor))
         out_port = ep->port();   // signal the client that the server is ready
 
+    async::Scope sessions;
+
     while (true) {
         auto client = co_await acceptor.async_accept();
-        if (!client) {
-            log::error("[server] accept error: {}", client.error());
-            continue;
-        }
-        async::co_spawn(session(std::move(*client)));
+        if (!client)
+            break;
+        sessions.spawn(session(std::move(*client)));
     }
+
+    co_await sessions.join();
 }
 
 auto one_request(net::ip::tcp::socket& sock,
@@ -107,6 +109,7 @@ auto demo() -> async::Task<>
     co_await client(shutdown.get_token(), server_port);
 
     log::info("[demo] completed cleanly");
+    async::stop();
 }
 
 } // namespace
