@@ -22,7 +22,7 @@ namespace async {
  */
 template<awaitable Awaitable>
     requires std::movable<std::remove_cvref_t<Awaitable>>
-auto co_spawn(Awaitable awaitable) -> DetachedTask
+auto co_spawn(Awaitable awaitable, IOContext& context = this_coroutine::context()) -> DetachedTask
 {
     co_await std::move(awaitable);
 }

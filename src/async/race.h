@@ -1,17 +1,12 @@
 #ifndef BLOG_ASYNC_RACE_H
 #define BLOG_ASYNC_RACE_H
 
-#include <atomic>
 #include <concepts>
-#include <memory>
-#include <stop_token>
-#include <tuple>
 #include <type_traits>
 #include <utility>
 
 #include <awaitable.h>
-#include <co_spawn.h>
-#include <stop_requested_awaiter.h>
+#include <scope.h>
 #include <task.h>
 
 namespace async {
@@ -58,40 +53,20 @@ concept stop_awaitable_provider
     = std::invocable<std::decay_t<Provider>, std::stop_token>
    && awaitable<std::invoke_result_t<std::decay_t<Provider>, std::stop_token>>;
 
-template<typename Provider>
-auto race_spawned_task(Provider provider,
-                       std::stop_source stop,
-                       std::stop_source all_done,
-                       std::shared_ptr<std::atomic_size_t> pending) -> Task<>
-{
-    co_await std::move(provider)(stop.get_token());
-
-    stop.request_stop();
-
-    if (pending->fetch_sub(1, std::memory_order_acq_rel) == 1)
-        all_done.request_stop();
-}
-
-/**
- * @brief Race providers concurrently; first completion requests stop for the rest.
- */
 template<stop_awaitable_provider... Providers>
 auto race(Providers&&... providers) -> Task<>
 {
     static_assert(sizeof...(Providers) > 0, "race requires at least one provider");
 
-    std::stop_source stop;
-    std::stop_source all_done;
-    auto pending = std::make_shared<std::atomic_size_t>(sizeof...(Providers));
-
-    auto owned = std::tuple<std::decay_t<Providers>...>(std::forward<Providers>(providers)...);
-    std::apply(
-        [&](auto&... ps) -> void {
-            (co_spawn(race_spawned_task(std::move(ps), stop, all_done, pending)), ...);
-        },
-        owned);
-
-    co_await StopRequestedAwaiter(all_done.get_token());
+    Scope scope;
+    auto spawn_one = [&](auto p) {
+        scope.spawn([p = std::move(p), &scope]() mutable -> Task<> {
+            co_await std::move(p)(scope.stop_token());
+            scope.request_stop();
+        }());
+    };
+    (spawn_one(std::forward<Providers>(providers)), ...);
+    co_await scope.join();
 }
 
 } // namespace async

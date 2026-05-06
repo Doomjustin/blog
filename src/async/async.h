@@ -16,6 +16,7 @@
 #include <read_awaiter.h>
 #include <retry.h>
 #include <run.h>
+#include <scope.h>
 #include <signals.h>
 #include <single_operation.h>
 #include <sleep_for.h>
