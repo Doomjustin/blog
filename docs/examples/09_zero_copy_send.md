@@ -4,7 +4,7 @@
 
 ```bash
 # Terminal 1: Start zero-copy server
-$ ./build/demo/example.zero_copy_send 8081
+$ example.zero_copy_send 8081
 [INFO] Zero-copy server listening on port 8081
 
 # Terminal 2: Connect to the server

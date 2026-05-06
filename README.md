@@ -9,13 +9,21 @@
 - Linux kernel ≥ 6.1（io_uring multishot 支持）
 - Clang ≥ 17 或 GCC ≥ 13
 - CMake ≥ 3.30
+- pkg-config
+- liburing
+- jemalloc
 - [vcpkg](https://github.com/microsoft/vcpkg)（依赖管理）
 
 ### 构建
 
 ```bash
-cmake -B build -G Ninja
-cmake --build build
+export VCPKG_ROOT=/path/to/vcpkg
+
+cmake -S . -B build-release -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+
+cmake --build build-release -j
 ```
 
 ### 最小示例
@@ -89,20 +97,13 @@ int main()
 
 ## 示例
 
-| # | 示例 | 说明 |
-|----|------|------|
-| 1 | [hello_coroutine](docs/examples/01_hello_coroutine.md) | 最小协程用法，`async::run` 入口 |
-| 2 | [sleep](docs/examples/02_sleep.md) | `async::sleep_for`，不阻塞线程的等待 |
-| 3 | [tcp_echo client](docs/examples/03_tcp_echo_client.md) | TCP 连接、发送、接收 |
-| 4 | [tcp_echo server](docs/examples/04_tcp_echo_server.md) | acceptor 循环、session co_spawn、优雅退出 |
-| 5 | [concurrent_tasks](docs/examples/05_concurrent_tasks.md) | `async::co_spawn` 多个独立协程并发运行 |
-| 6 | [timeout_echo server](docs/examples/06_timeout_echo_server.md) | `async::timeout` 包裹单次 recv，idle 断开 |
-| 7 | [line_protocol](docs/examples/07_line_protocol.md) | `receive_stream()` 流式读取、协议分帧 |
-| 8 | [scatter_gather](docs/examples/08_scatter_gather.md) | 多缓冲区分散写，HTTP 响应模式 |
-| 9 | [zero_copy_send](docs/examples/09_zero_copy_send.md) | `IORING_OP_SEND_ZC` 零拷贝发送 |
-| 10 | [stop_then_sleep](docs/examples/10_stop_then_sleep.md) | `async::stop_then` 基础用法，可取消的等待 |
-| 11 | [stop_then_request](docs/examples/11_stop_then_request.md) | 请求循环中逐操作取消，stop 在最近 I/O 点生效 |
-| 12 | [stop_then_resilient](docs/examples/12_stop_then_resilient.md) | 带超时与重试的韧性客户端，stop 优先级最高 |
+完整导读与 20 个示例索引见：[docs/examples/README.md](docs/examples/README.md)
+
+代表性示例：
+
+- 入门： [hello_coroutine](docs/examples/01_hello_coroutine.md)
+- 韧性请求： [stop_then_resilient](docs/examples/12_stop_then_resilient.md)
+- 生产骨架： [graceful_shutdown_server](docs/examples/19_graceful_shutdown_server.md)
 
 ## 博客
 

@@ -113,7 +113,7 @@ concept cancelable_operation = requires(T& t)
     typename T::resume_type;
 
     requires std::is_lvalue_reference_v<decltype(t.context())>;
-    t.await_suspend(std::coroutine_handle<>());
+    { t.await_suspend(std::coroutine_handle<>()) } -> std::same_as<bool>;
     t.cancel();
 };
 

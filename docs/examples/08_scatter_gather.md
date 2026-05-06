@@ -4,7 +4,7 @@
 
 ```bash
 # Terminal 1: Start scatter-gather server
-$ ./build/examples/scatter_gather/example.scatter_gather 8080
+$ example.scatter_gather 8080
 [INFO] Scatter-gather server listening on port 8080
 
 # Terminal 2: Connect and send a request

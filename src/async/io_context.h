@@ -277,6 +277,7 @@ private:
 
         MPSCQueue<Operation> cross_thread_operations_;
         std::vector<Operation*> local_operations_;
+        std::vector<PendingEvent> pending_cqe_events_;
 
         void arm_wakeup();
 

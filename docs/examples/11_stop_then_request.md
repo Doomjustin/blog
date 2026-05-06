@@ -2,6 +2,8 @@
 
 > **源文件**：[examples/stop_then_request/main.cpp](../../examples/stop_then_request/main.cpp)
 
+> **说明**：该示例源码已保持轻注释，设计意图与流程解释统一收敛在本文档中，便于代码与说明职责分离。
+
 上一篇用 `stop_then` 打断了一个 `sleep_for`。本篇把同样的技术用在真实的请求循环中：client 持续向 server 发请求，外部信号触发后立即停止，不等当前 RPC 完成。
 
 ## 示例结构
@@ -92,10 +94,10 @@ for (int i = 0; ; ++i) {
 ## 运行
 
 ```bash
-./build/examples/stop_then_request/example.stop_then_request
+example.stop_then_request
 ```
 
-一次实测输出（2026-05-06）：
+实际输出：
 
 ```
 [2026-05-06 01:18:40.516] [181238] [info] [client] connected to :40613

@@ -80,10 +80,10 @@ auto result = co_await async::stop_then(async::sleep_for(3s), stop_source.get_to
 ## 运行
 
 ```bash
-./build/examples/stop_then_sleep/example.stop_then_sleep
+example.stop_then_sleep
 ```
 
-一次实测输出（2026-05-06）：
+实际输出：
 
 ```
 [2026-05-06 01:16:12.152] [180651] [info] waiting on cancellable sleep

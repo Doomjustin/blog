@@ -34,8 +34,9 @@ public:
       : SingleOperation<TimerAwaier, void>{ context }
     {
         using namespace std::chrono;
-        timeout_.tv_sec = duration_cast<seconds>(d).count();
-        timeout_.tv_nsec = duration_cast<nanoseconds>(d % 1s).count();
+        auto ns = duration_cast<nanoseconds>(d).count();
+        timeout_.tv_sec = ns / 1'000'000'000;
+        timeout_.tv_nsec = ns % 1'000'000'000;
     }
 
     /**

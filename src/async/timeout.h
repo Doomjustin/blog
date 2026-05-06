@@ -30,7 +30,7 @@ namespace async {
  * @tparam InnerOperation Operation type satisfying `single_shot_only_operation`.
  */
 template<single_shot_operation InnerOperation>
-class TimeoutAwaiter: public Operation {
+class TimeoutAwaiter: public CancelableOperation {
 public:
     using resume_type = typename InnerOperation::resume_type;
 
@@ -65,6 +65,9 @@ public:
         auto* io_sqe = context().sqe();
         auto* timeout_sqe = context().sqe();
         if (!io_sqe || !timeout_sqe) {
+            sanitize_sqe(io_sqe);
+            sanitize_sqe(timeout_sqe);
+
             result_ = -EAGAIN;
             return false;
         }
@@ -108,9 +111,13 @@ public:
 
         if (--pending_cqes_ == 0) {
             context().untrack(this);
-            auto handle = std::exchange(handle_, nullptr);
-            handle.resume();
+            this->resume(handle_, result_, flags);
         }
+    }
+
+    void cancel() noexcept override
+    {
+        context().cancel(this);
     }
     
     auto context() noexcept -> decltype(std::declval<InnerOperation&>().context())
@@ -119,6 +126,15 @@ public:
     }
 
 private:
+    static void sanitize_sqe(::io_uring_sqe* sqe) noexcept
+    {
+        if (!sqe)
+            return;
+
+        ::io_uring_prep_nop(sqe);
+        ::io_uring_sqe_set_data(sqe, nullptr);
+    }
+
     InnerOperation inner_operation_;
     __kernel_timespec timeout_;
 

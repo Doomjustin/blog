@@ -144,10 +144,10 @@ auto server(std::uint16_t& out_port, std::stop_token stop) -> async::Task<>
 ## 运行
 
 ```bash
-./build/examples/stop_then_resilient/example.stop_then_resilient
+example.stop_then_resilient
 ```
 
-一次实测输出（2026-05-06）：
+实际输出：
 
 ```
 [2026-05-06 01:18:01.313] [181089] [info] [client] job=fast-a ok -> ack:fast-a
@@ -172,3 +172,7 @@ auto server(std::uint16_t& out_port, std::stop_token stop) -> async::Task<>
 ```
 
 注意 slow-d 用的是 `log::error`——从 client 的角度看，这是一个未完成的 job，记录为 error 是合理的，尽管原因是外部取消而非真正的故障。
+
+## 下一步
+
+如果你想继续看并行组合器，下一篇从“等待全部完成”开始：[when_all](13_when_all.md)。

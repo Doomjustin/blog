@@ -1,6 +1,7 @@
 #ifndef BLOG_ASYNC_STOP_THEN_H
 #define BLOG_ASYNC_STOP_THEN_H
 
+#include <cerrno>
 #include <coroutine>
 #include <expected>
 #include <functional>
@@ -37,7 +38,7 @@ public:
         return pre_stopped_;
     }
 
-    void await_suspend(std::coroutine_handle<> handle) noexcept
+    auto await_suspend(std::coroutine_handle<> handle) noexcept -> bool
     {
         handle_ = handle;
         inner_.parent = this;
@@ -48,8 +49,13 @@ public:
                     if (*alive) target->cancel();
                 });
         });
-        
-        inner_.await_suspend(handle);
+
+        if (!inner_.await_suspend(handle)) {
+            stop_callback_.reset();
+            return false;
+        }
+
+        return true;
     }
 
     auto await_resume() -> std::expected<resume_type, std::error_code>
@@ -57,11 +63,9 @@ public:
         if (pre_stopped_)
             return std::unexpected(std::make_error_code(std::errc::operation_canceled));
 
-        if (result_ < 0)
-            return unexpected_system_error(-result_);
-
-        if constexpr (!std::is_void_v<resume_type>)
-            inner_.set_result(result_, flags_);
+        // Cancellation CQE should be surfaced uniformly as operation_canceled.
+        if (result_ == -ECANCELED)
+            return std::unexpected(std::make_error_code(std::errc::operation_canceled));
 
         return inner_.await_resume();
     }

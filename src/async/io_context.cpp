@@ -1,6 +1,7 @@
 #include "io_context.h"
 
 #include <algorithm>
+#include <vector>
 
 #include <liburing.h>
 
@@ -132,20 +133,20 @@ void IOContext::Scheduler::schedule()
         throw_system_error("io_uring_submit_and_wait");
     }
 
-    static thread_local std::vector<PendingEvent> pending_events;
-
-    pending_events.clear();
-    const auto cq_ready = ::io_uring_cq_ready(&ring_);
-    if (pending_events.capacity() < cq_ready)
-        pending_events.reserve(cq_ready);
+    std::vector<PendingEvent> events;
+    events.swap(pending_cqe_events_);
 
     unsigned count{ 0 };
-    collect_cqe_events(pending_events, count);
+    collect_cqe_events(events, count);
 
     if (count > 0)
         ::io_uring_cq_advance(&ring_, count);
 
-    dispatch_cqe_events(pending_events);
+    dispatch_cqe_events(events);
+    events.clear();
+
+    if (pending_cqe_events_.empty())
+        pending_cqe_events_.swap(events);
 }
 
 void IOContext::Scheduler::collect_cqe_events(std::vector<PendingEvent>& pending_events, unsigned& count) noexcept
@@ -193,9 +194,9 @@ void IOContext::Scheduler::wakeup()
 
 void IOContext::Scheduler::arm_wakeup()
 {
-    auto* sqe = ::io_uring_get_sqe(&ring_);
+    auto* sqe = this->sqe();
     if (!sqe)
-        throw_system_error("io_uring_get_sqe failed when re-arming wakeup");
+        throw_system_error("sqe failed when re-arming wakeup");
 
     ::io_uring_prep_poll_add(sqe, wakeup_fd_, POLLIN);
     ::io_uring_sqe_set_data64(sqe, WAKEUP_MARKER);
@@ -224,8 +225,6 @@ void IOContext::Scheduler::process_local_operations() noexcept
 
     for (auto* operation : pending_operations)
         operation->complete(0, 0);
-    
-    local_operations_.clear();
 }
 
 IOContext::BufferRingGroup::~BufferRingGroup()

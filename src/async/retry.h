@@ -76,10 +76,10 @@ public:
     [[nodiscard]]
     constexpr auto await_ready() const noexcept -> bool { return false; }
 
-    void await_suspend(std::coroutine_handle<> handle) noexcept
+    auto await_suspend(std::coroutine_handle<> handle) noexcept -> bool
     {
         handle_ = handle;
-        start_io_attempt();
+        return start_io_attempt();
     }
 
     auto await_resume() -> std::expected<resume_type, std::error_code>
@@ -91,24 +91,30 @@ public:
 
     void complete(int result, std::uint32_t flags) noexcept override
     {
-        // External cancel (e.g. timeout): propagate immediately.
-        if (is_canceling_) {
-            this->resume(handle_, result, flags);
-            return;
-        }
+        while (true) {
+            if (is_canceling_) {
+                this->resume(handle_, result, flags);
+                return;
+            }
 
-        if (state_ == State::Delaying) {
-            // Timer fired: start the next IO attempt.
-            start_io_attempt();
-            return;
-        }
+            if (state_ == State::Delaying) {
+                if (start_io_attempt())
+                    return;
 
-        // IO completed: success or retries exhausted → done.
-        if (result >= 0 || retries_left_ == 0) {
-            this->resume(handle_, result, flags);
-        } else {
+                result = -EAGAIN;
+                continue;
+            }
+
+            if (result >= 0 || retries_left_ == 0) {
+                this->resume(handle_, result, flags);
+                return;
+            }
+
             --retries_left_;
-            start_delay();
+            if (start_delay())
+                return;
+
+            result = -EAGAIN;
         }
     }
 
@@ -133,21 +139,21 @@ public:
 private:
     enum class State : std::uint8_t { IoRunning, Delaying };
 
-    void start_io_attempt() noexcept
+    auto start_io_attempt() noexcept -> bool
     {
         state_ = State::IoRunning;
         io_awaiter_.emplace(factory_());
         io_awaiter_->parent = this;
-        io_awaiter_->await_suspend(handle_);
+        return io_awaiter_->await_suspend(handle_);
     }
 
-    void start_delay() noexcept
+    auto start_delay() noexcept -> bool
     {
         state_ = State::Delaying;
         auto dur = delay_strategy_(max_retries_ - retries_left_);
         delay_awaiter_.emplace(context(), dur);
         delay_awaiter_->parent = this;
-        delay_awaiter_->await_suspend(handle_);
+        return delay_awaiter_->await_suspend(handle_);
     }
 
     std::size_t max_retries_;
