@@ -1,6 +1,6 @@
-# 6.2 线程模型与局部性：多线程部署策略
+# 6.1 线程模型与局部性：多线程部署策略
 
-> **前置知识**：本章假设你已读完 [6.1（信号与事件循环）](15_signals.md)，以及第 4 部分的 `ChannelPipe<T>` 设计。
+> **前置知识**：本章假设你已读完第 4 部分（并发编排与资源收敛），尤其是 `ChannelPipe<T>` 的 owner-thread 与 backpressure 设计。
 > **源文件**：[tutorial/20_threading/main.cpp](../../tutorial/20_threading/main.cpp)
 > **可执行文件**：`./build/tutorial/20_threading/tutorial.20_threading`
 > **下一节**：附录

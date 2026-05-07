@@ -43,9 +43,9 @@
 
 ## 第 6 部分：生产级架构管控
 
-- [6.1 信号与事件循环集成：优雅停机与系统生命周期](15_signals.md)
-- [6.2 线程模型与局部性：多线程部署策略](16_threading.md)
+- [6.1 线程模型与局部性：多线程部署策略](15_threading.md)
 
 ## 附录
 
-- [附录：跨线程通信基准测试——ChannelPipe vs std::mutex](17_benchmark.md)
+- [附录：跨线程通信基准测试——ChannelPipe vs Asio](16_benchmark.md)
+- [附录：手写 Awaiter——将同步/回调 API 桥接到协程](17_custom_awaiter.md)

@@ -2,7 +2,7 @@
 
 > **前置知识**：本章深化 [2.3 流式读取与底层内存映射](03_receive_stream.md) 中引入的 `buffer_ring` 基础。理解 Provided Buffers 机制是该章的必要前置。
 > **源文件**：[tutorial/19_buffer_ring/main.cpp](../../tutorial/19_buffer_ring/main.cpp)
-> **下一节**：[6.1 信号与事件循环集成](15_signals.md)
+> **下一节**：[6.1 线程模型与局部性](15_threading.md)
 
 ---
 
@@ -173,4 +173,4 @@ send_zero_copy + buffer_ring 预分配（完整流）
 
 buffer_ring 通过固定大小的环形队列、零分配策略和 cache-friendly 内存布局，显著提升接收侧吞吐量。容量规划应基于并发连接数、RTT 和应用处理延迟，保守取 16384-65536。内存对齐和 NUMA 感知能进一步优化 TLB 和跨 socket 访问。
 
-> **下一节**：[6.1 信号与事件循环集成](15_signals.md) — 从性能微调进阶到生产级架构：优雅停机、信号处理、完整系统生命周期管控。
+> **下一节**：[6.1 线程模型与局部性](15_threading.md) — 从性能微调进阶到多线程部署实践：对称并发、跨线程迁移与局部性优化。
