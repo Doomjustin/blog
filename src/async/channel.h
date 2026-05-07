@@ -1,10 +1,9 @@
 #ifndef BLOG_ASYNC_CHANNEL_H
 #define BLOG_ASYNC_CHANNEL_H
 
-#include <atomic>
+#include <cassert>
 #include <coroutine>
 #include <expected>
-#include <mutex>
 #include <optional>
 #include <system_error>
 #include <utility>
@@ -12,26 +11,25 @@
 
 #include <io_context.h>
 #include <operation.h>
-#include <spinlock.h>
 #include <this_coroutine.h>
 
 namespace async {
 
 // ── Error category ───────────────────────────────────────────────────────────
 
-enum class ChannelError: std::uint8_t { Closed = 1 };
+enum class ChannelError : std::uint8_t { Closed = 1 };
 
 inline auto channel_category() noexcept -> const std::error_category&
 {
     class Category : public std::error_category {
     public:
         auto name() const noexcept -> const char* override { return "channel"; }
-        
+
         auto message(int ev) const -> std::string override
         {
             if (ev == static_cast<int>(ChannelError::Closed))
                 return "channel closed";
-            return "unknown channel error";
+            return "unknown error";
         }
     };
     static Category instance;
@@ -40,21 +38,73 @@ inline auto channel_category() noexcept -> const std::error_category&
 
 inline auto make_error_code(ChannelError e) -> std::error_code
 {
-    return { static_cast<int>(e), channel_category() };
+    return {static_cast<int>(e), channel_category()};
 }
 
-// ── Channel ──────────────────────────────────────────────────────────────────
+// ── Intrusive linked list (O(1) erase) ───────────────────────────────────────
+
+struct IntrusiveOperationList {
+    Operation* head_{nullptr};
+    Operation* tail_{nullptr};
+
+    [[nodiscard]] 
+    auto empty() const noexcept -> bool { return head_ == nullptr; }
+
+    void push_back(Operation* op) noexcept
+    {
+        op->next = nullptr;
+        op->prev = tail_;
+        if (tail_)
+            tail_->next = op;
+        else
+            head_ = op;
+        tail_ = op;
+    }
+
+    auto pop_front() noexcept -> Operation*
+    {
+        auto* op = head_;
+        if (op) {
+            head_ = op->next;
+            if (head_)
+                head_->prev = nullptr;
+            else
+                tail_ = nullptr;
+            op->prev = op->next = nullptr;
+        }
+        return op;
+    }
+
+    void erase(Operation* op) noexcept
+    {
+        if (op->prev)
+            op->prev->next = op->next;
+        else
+            head_ = op->next;
+
+        if (op->next)
+            op->next->prev = op->prev;
+        else
+            tail_ = op->prev;
+
+        op->prev = op->next = nullptr;
+    }
+};
 
 /**
- * @brief Buffered MPMC async channel.
+ * @brief Lockfree MPMC channel using architectural delegation.
  *
- * Producers and consumers may run on different `IOContext` threads.
- * Both awaiters derive from `CancelableOperation` so they compose with
- * `when_any` and `timeout`.
+ * Core principle: Channel itself is completely single-threaded (owned by IOContext).
+ * Cross-thread sends bypass Channel internals and directly post Operation to target IOContext.
+ * No atomic ops on Channel internals — all atomics confined to IOContext's bottom-level MPSC.
  *
- * Use `capacity = 0` for an unbuffered (rendezvous) channel.
+ * This achieves "business-layer lockfree" by delegating concurrency control upward.
  *
- * @tparam T Value type transported through the channel.
+ * @warning **Owner-thread only.** Every call to `send()`, `receive()`, `close()`, and all
+ * internal state mutations must execute on the single `IOContext` thread that owns this
+ * channel. Using this channel from a different thread produces a data race and undefined
+ * behaviour. For cross-thread pipelines, use `make_channel<T>()` / `ChannelSender` /
+ * `ChannelReceiver` instead.
  */
 template<typename T>
 class Channel {
@@ -62,72 +112,75 @@ public:
     class ReceiveAwaiter;
     class SendAwaiter;
 
-    explicit Channel(std::size_t capacity = 0) : capacity_{ capacity }
+    /**
+     * @brief Create channel with given buffer capacity.
+     * @param capacity 0 = rendezvous, >0 = buffered
+     */
+    explicit Channel(std::size_t capacity = 0)
+        : owner_ctx_{ &this_coroutine::context() }
+        , capacity_{ capacity }
     {
         if (capacity_ > 0)
             buffer_.resize(capacity_);
     }
 
     Channel(const Channel&) = delete;
-    auto operator=(const Channel&) -> Channel& = delete;
-
     Channel(Channel&&) = delete;
-    auto operator=(Channel&&) -> Channel& = delete;
 
     ~Channel() { close(); }
 
     /**
      * @brief Close the channel.
      *
-     * All pending senders and receivers are woken with `ChannelError::Closed`.
-     * Future `send` / `receive` calls also fail immediately.
+     * Called only by owner thread. Wakes all suspended senders/receivers.
+     * Drain semantics: buffered data consumed before ChannelError::Closed returned.
      */
     void close() noexcept
     {
-        // Drain both wait queues under the lock, then wake outside.
-        IntrusiveList senders;
-        IntrusiveList receivers;
-        {
-            std::scoped_lock lock{ mutex_ };
-            if (closed_)
-                return;
-            closed_ = true;
-            senders   = std::exchange(waiting_senders_,   {});
-            receivers = std::exchange(waiting_receivers_, {});
+        assert(owner_ctx_->is_owner_thread() &&
+               "Channel::close() must be called from the owner IOContext thread");
+        if (closed_)
+            return;
+        closed_ = true;
+
+        // Drain and wake all waiters (owner thread context — no atomics needed)
+        while (!waiting_senders_.empty()) {
+            auto* op = waiting_senders_.pop_front();
+            auto* sender = static_cast<SendAwaiter*>(op);
+            sender->in_queue_ = false;
+            wake_awaiter(sender, 0);  // 0 = success, ok_ remains false → Closed error
         }
-        while (!senders.empty()) {
-            auto* op = static_cast<SendAwaiter*>(senders.pop_front());
-            op->in_queue_ = false;
-            wake(op, *op->ctx_, 0);
-        }
-        while (!receivers.empty()) {
-            auto* op = static_cast<ReceiveAwaiter*>(receivers.pop_front());
-            op->in_queue_ = false;
-            wake(op, *op->ctx_, 0);
+
+        while (!waiting_receivers_.empty()) {
+            auto* op = waiting_receivers_.pop_front();
+            auto* receiver = static_cast<ReceiveAwaiter*>(op);
+            receiver->in_queue_ = false;
+            wake_awaiter(receiver, 0);  // 0 = success, ok_ remains false → Closed error
         }
     }
 
     [[nodiscard]]
-    auto is_closed() const noexcept -> bool { return closed_.load(std::memory_order_relaxed); }
+    auto send(T value) -> SendAwaiter 
+    {
+        return SendAwaiter{*this, std::move(value)}; 
+    }
 
-    // ── SendAwaiter ──────────────────────────────────────────────────────────
+    [[nodiscard]]
+    auto receive() -> ReceiveAwaiter 
+    { 
+        return ReceiveAwaiter{*this}; 
+    }
 
-    /**
-     * @brief Awaiter returned by `send()`.
-     *
-     * Captures the calling coroutine's `IOContext` so completions are
-     * delivered on the correct thread. Integrates with `when_any` / `timeout`.
-     */
+    // ── SendAwaiter ───────────────────────────────────────────────────────
+
     class [[nodiscard]] SendAwaiter : public CancelableOperation {
         friend class Channel;
 
     public:
         using resume_type = void;
 
-        SendAwaiter(Channel& ch, IOContext& ctx, T value)
-          : ch_{ ch }, 
-            ctx_{ &ctx }, 
-            value_{ std::move(value) }
+        SendAwaiter(Channel& ch, T value)
+          : ch_{ ch }, value_{ std::move(value) }
         {}
 
         [[nodiscard]]
@@ -136,33 +189,24 @@ public:
         auto await_suspend(std::coroutine_handle<> h) noexcept -> bool
         {
             handle_ = h;
-            ctx_->add_work();
-
-            if (!ch_.try_send_or_suspend(this)) {
-                ctx_->drop_work();
-                return false;
-            }
-            return true;
+            ctx_ = &this_coroutine::context();
+            return ch_.try_send_or_suspend(this);
         }
 
         auto await_resume() -> std::expected<void, std::error_code>
         {
             if (cancelled_)
                 return std::unexpected(std::make_error_code(std::errc::operation_canceled));
-
             if (!ok_)
                 return std::unexpected(make_error_code(ChannelError::Closed));
-            
             return {};
         }
 
-        void complete(int result, std::uint32_t flags) noexcept override
+        void complete(int result, std::uint32_t /*flags*/) noexcept override
         {
-            ctx_->drop_work();
             if (result == -ECANCELED)
                 cancelled_ = true;
-
-            this->resume(handle_, result, flags);
+            this->resume(handle_, result, 0);
         }
 
         void cancel() noexcept override { ch_.cancel_send(this); }
@@ -174,26 +218,22 @@ public:
         IOContext* ctx_;
         T value_;
         std::coroutine_handle<> handle_;
-        bool ok_ = false;
-        bool cancelled_ = false;
-        bool in_queue_ = false;
+        bool ok_{false};
+        bool cancelled_{false};
+        bool in_queue_{false};
     };
 
-    // ── ReceiveAwaiter ───────────────────────────────────────────────────────
+    // ── ReceiveAwaiter ────────────────────────────────────────────────────
 
-    /**
-     * @brief Awaiter returned by `receive()`.
-     *
-     * Captures the calling coroutine's `IOContext`. Integrates with
-     * `when_any` / `timeout`.
-     */
     class [[nodiscard]] ReceiveAwaiter : public CancelableOperation {
         friend class Channel;
 
     public:
         using resume_type = std::expected<T, std::error_code>;
 
-        ReceiveAwaiter(Channel& ch, IOContext& ctx) : ch_{ ch }, ctx_{ &ctx } {}
+        explicit ReceiveAwaiter(Channel& ch) 
+          : ch_{ ch }
+        {}
 
         [[nodiscard]]
         constexpr auto await_ready() const noexcept -> bool { return false; }
@@ -201,31 +241,27 @@ public:
         auto await_suspend(std::coroutine_handle<> h) noexcept -> bool
         {
             handle_ = h;
-            ctx_->add_work();
-
-            if (!ch_.try_receive_or_suspend(this)) {
-                ctx_->drop_work();
-                return false;
-            }
-            return true;
+            ctx_ = &this_coroutine::context();
+            return ch_.try_receive_or_suspend(this);
         }
 
         auto await_resume() -> std::expected<T, std::error_code>
         {
             if (cancelled_)
-                return std::unexpected(
-                    std::make_error_code(std::errc::operation_canceled));
+                return std::unexpected(std::make_error_code(std::errc::operation_canceled));
+
             if (!value_)
                 return std::unexpected(make_error_code(ChannelError::Closed));
+            
             return std::move(*value_);
         }
 
-        void complete(int result, std::uint32_t flags) noexcept override
+        void complete(int result, std::uint32_t /*flags*/) noexcept override
         {
-            ctx_->drop_work();
             if (result == -ECANCELED)
                 cancelled_ = true;
-            this->resume(handle_, result, flags);
+
+            this->resume(handle_, result, 0);
         }
 
         void cancel() noexcept override { ch_.cancel_receive(this); }
@@ -237,203 +273,144 @@ public:
         IOContext* ctx_;
         std::coroutine_handle<> handle_;
         std::optional<T> value_;
-        bool cancelled_ = false;
-        bool in_queue_ = false;
+        bool cancelled_{false};
+        bool in_queue_{false};
     };
-
-    // ── Public API ───────────────────────────────────────────────────────────
-
-    auto send(T value) -> SendAwaiter
-    {
-        return SendAwaiter{ *this, this_coroutine::context(), std::move(value) };
-    }
-
-    auto receive() -> ReceiveAwaiter
-    {
-        return ReceiveAwaiter{ *this, this_coroutine::context() };
-    }
 
 private:
-    // Intrusive linked list reusing Operation::prev / Operation::next.
-    // Channel awaiters are never tracked by IOContext, so these fields
-    // are free for use while the awaiter sits in a wait queue.
-    struct IntrusiveList {
-        Operation* head_{ nullptr };
-        Operation* tail_{ nullptr };
+    // ── Owner-thread-only state (zero atomics) ─────────────────────────────
 
-        [[nodiscard]] auto empty() const noexcept -> bool { return head_ == nullptr; }
-
-        void push_back(Operation* op) noexcept
-        {
-            op->next = nullptr;
-            op->prev = tail_;
-            if (tail_) tail_->next = op;
-            else head_ = op;
-            tail_ = op;
-        }
-
-        auto pop_front() noexcept -> Operation*
-        {
-            auto* op = head_;
-            if (!op) return nullptr;
-            head_ = op->next;
-            if (head_) head_->prev = nullptr;
-            else tail_ = nullptr;
-            op->prev = op->next = nullptr;
-            return op;
-        }
-
-        void erase(Operation* op) noexcept
-        {
-            if (op->prev) op->prev->next = op->next;
-            else head_ = op->next;
-            if (op->next) op->next->prev = op->prev;
-            else tail_ = op->prev;
-            op->prev = op->next = nullptr;
-        }
-    };
-
-    SpinLock mutex_;
+    IOContext* const owner_ctx_; ///< IOContext that owns this channel; asserted in hot paths
     std::size_t capacity_;
-    std::atomic<bool> closed_{ false };
+    bool closed_{false};
 
-    // Ring buffer for T values. Empty when capacity_ == 0 (rendezvous mode).
+    // Ring buffer: pre-allocated at construction, no dynamic allocation per send/receive
     std::vector<T> buffer_;
-    std::size_t head_idx_{ 0 };
-    std::size_t count_{ 0 };
+    std::size_t head_idx_{0};
+    std::size_t count_{0};
 
-    IntrusiveList waiting_senders_;
-    IntrusiveList waiting_receivers_;
+    // Intrusive lists for O(1) cancel via in_queue_ flag
+    IntrusiveOperationList waiting_senders_;
+    IntrusiveOperationList waiting_receivers_;
 
-    // A pending wake collected while holding the spinlock, fired after releasing it.
-    struct PendingWake {
-        CancelableOperation* op{ nullptr };
-        IOContext* ctx{ nullptr };
-        int result{ 0 };
+    // ── Helper: Delegate wake to correct thread ────────────────────────────
 
-        explicit operator bool() const noexcept { return op != nullptr; }
-        
-        void fire() noexcept { wake(op, *ctx, result); }
-    };
-
-    // Route op to its owning context: same-thread → submit, cross-thread → post.
-    // scheduled_result_ carries the result; no lambda allocation needed.
-    static void wake(CancelableOperation* op, IOContext& ctx, int result) noexcept
+    /**
+     * @brief Wake awaiter in its own IOContext (architectural delegation).
+     *
+     * Caller thread may differ from awaiter's owner thread.
+     * Atomics are hidden in IOContext::post (MPSC queue), not here.
+     */
+    static void wake_awaiter(SendAwaiter* sender, int result) noexcept
     {
-        op->scheduled_result_ = result;
-        if (ctx.is_owner_thread())
-            ctx.submit(op);
-        else
-            ctx.post(op);
+        sender->scheduled_result_ = result;
+        sender->ctx_->submit(sender);
     }
 
-    // Returns true if the caller should suspend (op enqueued), false if handled inline.
+    static void wake_awaiter(ReceiveAwaiter* receiver, int result) noexcept
+    {
+        receiver->scheduled_result_ = result;
+        receiver->ctx_->submit(receiver);
+    }
+
+    // ── Try operations (called only by owner thread) ────────────────────────
+
     auto try_send_or_suspend(SendAwaiter* op) -> bool
     {
-        PendingWake w;
-        bool suspend = false;
-        {
-            std::scoped_lock lock{ mutex_ };
+        assert(owner_ctx_->is_owner_thread() &&
+               "Channel: send must be co_await-ed on the owner IOContext thread");
 
-            if (closed_)
-                return false; // ok_ stays false → Closed error
+        // Channel closed?
+        if (closed_)
+            return false; // immediate resume with Closed error
 
-            // Direct handoff to a waiting receiver.
-            if (!waiting_receivers_.empty()) {
-                auto* recv = static_cast<ReceiveAwaiter*>(waiting_receivers_.pop_front());
-                recv->in_queue_ = false;
-                recv->value_.emplace(std::move(op->value_));
-                op->ok_ = true;
-                w = { recv, recv->ctx_, 0 };
-            }
-            // Buffer has space.
-            else if (count_ < capacity_) {
-                buffer_[(head_idx_ + count_) % capacity_] = std::move(op->value_);
-                ++count_;
-                op->ok_ = true;
-            }
-            // Buffer full (or rendezvous) — suspend.
-            else {
-                waiting_senders_.push_back(op);
-                op->in_queue_ = true;
-                suspend = true;
-            }
+        // Match with waiting receiver?
+        if (!waiting_receivers_.empty()) {
+            auto* recv = static_cast<ReceiveAwaiter*>(waiting_receivers_.pop_front());
+            recv->in_queue_ = false;
+            recv->value_.emplace(std::move(op->value_));
+            op->ok_ = true;
+            wake_awaiter(recv, 0);
+            return false; // immediate resume
         }
-        if (w) w.fire();
-        return suspend;
+
+        // Can buffer?
+        if (count_ < capacity_) {
+            std::size_t tail_idx = (head_idx_ + count_) % capacity_;
+            buffer_[tail_idx] = std::move(op->value_);
+            ++count_;
+            op->ok_ = true;
+            return false; // immediate resume
+        }
+
+        // Suspend: add to waiting senders
+        waiting_senders_.push_back(op);
+        op->in_queue_ = true;
+        return true;
     }
 
     auto try_receive_or_suspend(ReceiveAwaiter* op) -> bool
     {
-        PendingWake w;
-        bool suspend = false;
-        {
-            std::scoped_lock lock{ mutex_ };
+        assert(owner_ctx_->is_owner_thread() &&
+               "Channel: receive must be co_await-ed on the owner IOContext thread");
 
-            // Data in buffer — pop and optionally admit a waiting sender.
-            if (count_ > 0) {
-                op->value_ = std::move(buffer_[head_idx_]);
-                head_idx_ = (head_idx_ + 1) % capacity_;
-                --count_;
+        // Any buffered data?
+        if (count_ > 0) {
+            op->value_.emplace(std::move(buffer_[head_idx_]));
+            head_idx_ = (head_idx_ + 1) % capacity_;
+            --count_;
 
-                if (!waiting_senders_.empty()) {
-                    auto* snd = static_cast<SendAwaiter*>(waiting_senders_.pop_front());
-                    snd->in_queue_ = false;
-                    buffer_[(head_idx_ + count_) % capacity_] = std::move(snd->value_);
-                    ++count_;
-                    snd->ok_ = true;
-                    w = { snd, snd->ctx_, 0 };
-                }
-            }
-            // Closed and drained — signal EOF (value_ stays empty).
-            else if (closed_) {
-                // nothing
-            }
-            // Waiting sender — direct handoff (unbuffered or race).
-            else if (!waiting_senders_.empty()) {
+            // Wake waiting sender?
+            if (!waiting_senders_.empty()) {
                 auto* snd = static_cast<SendAwaiter*>(waiting_senders_.pop_front());
                 snd->in_queue_ = false;
-                op->value_.emplace(std::move(snd->value_));
+                std::size_t tail_idx = (head_idx_ + count_) % capacity_;
+                buffer_[tail_idx] = std::move(snd->value_);
+                ++count_;
                 snd->ok_ = true;
-                w = { snd, snd->ctx_, 0 };
+                wake_awaiter(snd, 0);
             }
-            // Nothing ready — suspend.
-            else {
-                waiting_receivers_.push_back(op);
-                op->in_queue_ = true;
-                suspend = true;
-            }
+            return false; // immediate resume
         }
-        if (w) w.fire();
-        return suspend;
+
+        // Channel closed?
+        if (closed_)
+            return false; // immediate resume with Closed error
+
+        // Match with waiting sender (rendezvous)?
+        if (!waiting_senders_.empty()) {
+            auto* snd = static_cast<SendAwaiter*>(waiting_senders_.pop_front());
+            snd->in_queue_ = false;
+            op->value_.emplace(std::move(snd->value_));
+            snd->ok_ = true;
+            wake_awaiter(snd, 0);
+            return false; // immediate resume
+        }
+
+        // Suspend: add to waiting receivers
+        waiting_receivers_.push_back(op);
+        op->in_queue_ = true;
+        return true;
     }
 
     void cancel_send(SendAwaiter* op) noexcept
     {
-        PendingWake w;
-        {
-            std::scoped_lock lock{ mutex_ };
-            if (op->in_queue_) {
-                waiting_senders_.erase(op);
-                op->in_queue_ = false;
-                w = { op, op->ctx_, -ECANCELED };
-            }
+        // Owner thread only
+        if (op->in_queue_) {
+            waiting_senders_.erase(op); // O(1)
+            op->in_queue_ = false;
+            wake_awaiter(op, -ECANCELED);
         }
-        if (w) w.fire();
     }
 
     void cancel_receive(ReceiveAwaiter* op) noexcept
     {
-        PendingWake w;
-        {
-            std::scoped_lock lock{ mutex_ };
-            if (op->in_queue_) {
-                waiting_receivers_.erase(op);
-                op->in_queue_ = false;
-                w = { op, op->ctx_, -ECANCELED };
-            }
+        // Owner thread only
+        if (op->in_queue_) {
+            waiting_receivers_.erase(op); // O(1)
+            op->in_queue_ = false;
+            wake_awaiter(op, -ECANCELED);
         }
-        if (w) w.fire();
     }
 };
 

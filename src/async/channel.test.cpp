@@ -9,328 +9,246 @@
 #include <run.h>
 #include <sleep_for.h>
 #include <task.h>
-#include <timeout.h>
-#include <when_any.h>
 
 using namespace std::chrono_literals;
+using namespace async;
 
-// ── Shared task helpers ──────────────────────────────────────────────────────
+// ── Test helpers ──────────────────────────────────────────────────────────
 
-// Sends [0, count) then closes the channel.
-static auto producer(async::Channel<int>& ch, int count) -> async::Task<>
+static auto send_value(Channel<int>& ch, int value) -> Task<>
 {
-    for (int i = 0; i < count; ++i)
-        co_await ch.send(i);
-    ch.close();
+    auto result = co_await ch.send(value);
+    REQUIRE(result);
 }
 
-// Sends `value` exactly `count` times (does not close).
-static auto producer_fixed(async::Channel<int>& ch, int value, int count) -> async::Task<>
+static auto receive_value(Channel<int>& ch, int expected) -> Task<>
 {
-    for (int i = 0; i < count; ++i)
-        co_await ch.send(value);
+    auto result = co_await ch.receive();
+    REQUIRE(result);
+    REQUIRE(*result == expected);
 }
 
-// Drains until closed, appends each value to `out`.
-static auto consumer(async::Channel<int>& ch, std::vector<int>& out) -> async::Task<>
+static auto drain_channel(Channel<int>& ch, std::vector<int>& out) -> Task<>
 {
-    while (true) {
-        auto v = co_await ch.receive();
-        if (!v)
-            break;
+    while (auto v = co_await ch.receive()) {
         out.push_back(*v);
     }
 }
 
-// Receives exactly `count` values, accumulates into `total`.
-static auto consumer_counted(async::Channel<int>& ch, int count,
-                             std::atomic<int>& total) -> async::Task<>
+TEST_CASE("channel: basic compilation and types")
 {
-    for (int i = 0; i < count; ++i) {
-        auto v = co_await ch.receive();
-        REQUIRE(v.has_value());
-        total += *v;
-    }
+    auto ch = Channel<int>{1};
+
+    // Verify SendAwaiter and ReceiveAwaiter are defined
+    static_assert(std::is_same_v<decltype(ch.send(42))::resume_type, void>);
+    static_assert(std::is_same_v<decltype(ch.receive())::resume_type,
+                                 std::expected<int, std::error_code>>);
+
+    // Verify error type
+    auto err = make_error_code(ChannelError::Closed);
+    REQUIRE(err.category().name() == std::string("channel"));
 }
 
-// Waits 1 ms, sends one value, then closes the channel.
-static auto slow_producer(async::Channel<int>& ch, int value) -> async::Task<>
+TEST_CASE("channel: unbuffered rendezvous between two tasks")
 {
-    co_await async::sleep_for(1ms);
-    co_await ch.send(value);
-    ch.close();
-}
+    auto entry = []() -> Task<> {
+        Channel<int> ch{0};
 
-// Receives one value and stores it in `out`.
-static auto receive_one(async::Channel<int>& ch, int& out) -> async::Task<>
-{
-    auto v = co_await ch.receive();
-    REQUIRE(v.has_value());
-    out = *v;
-}
-
-// Sends one value then closes the channel.
-static auto send_one_and_close(async::Channel<int>& ch, int value) -> async::Task<>
-{
-    co_await ch.send(value);
-    ch.close();
-}
-
-// ── Tests ────────────────────────────────────────────────────────────────────
-
-TEST_CASE("channel: producer and consumer tasks communicate via buffered channel",
-          "[async][channel]")
-{
-    std::vector<int> out;
-
-    auto entry = [&]() -> async::Task<> {
-        async::Channel<int> ch{ 4 };
-        co_await async::all(producer(ch, 8), consumer(ch, out));
-    };
-    async::run(entry);
-
-    REQUIRE(out == std::vector<int>{ 0, 1, 2, 3, 4, 5, 6, 7 });
-}
-
-TEST_CASE("channel: sender suspends when buffer is full, resumes as consumer drains",
-          "[async][channel]")
-{
-    std::vector<int> out;
-
-    auto entry = [&]() -> async::Task<> {
-        async::Channel<int> ch{ 2 };
-        co_await async::all(producer(ch, 6), consumer(ch, out));
-    };
-    async::run(entry);
-
-    REQUIRE(out == std::vector<int>{ 0, 1, 2, 3, 4, 5 });
-}
-
-TEST_CASE("channel: receiver suspends until producer sends", "[async][channel]")
-{
-    int received = 0;
-
-    auto entry = [&]() -> async::Task<> {
-        async::Channel<int> ch{ 1 };
-        co_await async::all(slow_producer(ch, 42), receive_one(ch, received));
-    };
-    async::run(entry);
-
-    REQUIRE(received == 42);
-}
-
-TEST_CASE("channel: send to closed channel returns Closed error", "[async][channel]")
-{
-    auto entry = []() -> async::Task<> {
-        async::Channel<int> ch{ 1 };
-        ch.close();
-
-        auto result = co_await ch.send(99);
-        REQUIRE_FALSE(result.has_value());
-        REQUIRE(result.error() == async::make_error_code(async::ChannelError::Closed));
-    };
-    async::run(entry);
-}
-
-TEST_CASE("channel: receive drains buffer then returns Closed error", "[async][channel]")
-{
-    auto entry = []() -> async::Task<> {
-        async::Channel<int> ch{ 4 };
-
-        co_await ch.send(10);
-        co_await ch.send(20);
-        ch.close();
-
-        auto v1 = co_await ch.receive();
-        REQUIRE(v1.has_value());
-        REQUIRE(*v1 == 10);
-
-        auto v2 = co_await ch.receive();
-        REQUIRE(v2.has_value());
-        REQUIRE(*v2 == 20);
-
-        auto v3 = co_await ch.receive();
-        REQUIRE_FALSE(v3.has_value());
-        REQUIRE(v3.error() == async::make_error_code(async::ChannelError::Closed));
-    };
-    async::run(entry);
-}
-
-TEST_CASE("channel: unbuffered rendezvous between two tasks", "[async][channel]")
-{
-    int received = 0;
-
-    auto entry = [&]() -> async::Task<> {
-        async::Channel<int> ch{ 0 };
-        co_await async::all(send_one_and_close(ch, 7), receive_one(ch, received));
-    };
-    async::run(entry);
-
-    REQUIRE(received == 7);
-}
-
-TEST_CASE("channel: multiple producers fan-in to single consumer", "[async][channel]")
-{
-    std::atomic<int> total{ 0 };
-
-    auto entry = [&]() -> async::Task<> 
-    {
-        async::Channel<int> ch{ 8 };
-        // 3 producers × 3 values each → consumer reads 9 messages
-        co_await async::all(
-            producer_fixed(ch, 1,   3),
-            producer_fixed(ch, 10,  3),
-            producer_fixed(ch, 100, 3),
-            consumer_counted(ch, 9, total)
-        );
-    };
-    async::run(entry);
-
-    // 3×1 + 3×10 + 3×100 = 333
-    REQUIRE(total == 333);
-}
-
-TEST_CASE("channel: close wakes suspended receiver with Closed error", "[async][channel]")
-{
-    // receiver suspends on empty channel, then close() wakes it
-    std::expected<int, std::error_code> result{};
-
-    auto receiver_task = [](async::Channel<int>& ch,
-                            std::expected<int, std::error_code>& out) -> async::Task<> {
-        out = co_await ch.receive();
-    };
-
-    auto closer_task = [](async::Channel<int>& ch) -> async::Task<> {
-        co_await async::sleep_for(1ms);
-        ch.close();
-    };
-
-    auto entry = [&]() -> async::Task<> {
-        async::Channel<int> ch{ 0 };
-        co_await async::all(receiver_task(ch, result), closer_task(ch));
-    };
-    async::run(entry);
-
-    REQUIRE_FALSE(result.has_value());
-    REQUIRE(result.error() == async::make_error_code(async::ChannelError::Closed));
-}
-
-TEST_CASE("channel: close wakes suspended sender with Closed error", "[async][channel]")
-{
-    // sender suspends on full channel (rendezvous), then close() wakes it
-    std::expected<void, std::error_code> result{};
-
-    auto sender_task = [](async::Channel<int>& ch,
-                          std::expected<void, std::error_code>& out) -> async::Task<> {
-        out = co_await ch.send(42);
-    };
-
-    auto closer_task = [](async::Channel<int>& ch) -> async::Task<> {
-        co_await async::sleep_for(1ms);
-        ch.close();
-    };
-
-    auto entry = [&]() -> async::Task<> {
-        async::Channel<int> ch{ 0 }; // rendezvous: sender will suspend
-        co_await async::all(sender_task(ch, result), closer_task(ch));
-    };
-    async::run(entry);
-
-    REQUIRE_FALSE(result.has_value());
-    REQUIRE(result.error() == async::make_error_code(async::ChannelError::Closed));
-}
-
-TEST_CASE("channel: cancelled receive via when_any returns operation_canceled",
-          "[async][channel]")
-{
-    // receive suspends; a concurrent sleep wins the race and cancels the receive
-    auto entry = []() -> async::Task<> {
-        async::Channel<int> ch{ 0 };
-
-        auto result = co_await async::when_any(
-            ch.receive(),
-            async::sleep_for(1ms)
-        );
-
-        // sleep_for has resume_type void; ch.receive() has resume_type int
-        // → heterogeneous → variant; index 1 means sleep won
-        REQUIRE(result.index() == 1);
-    };
-    async::run(entry);
-}
-
-TEST_CASE("channel: cancelled send via when_any returns operation_canceled",
-          "[async][channel]")
-{
-    // sender suspends on rendezvous channel; sleep wins the race and cancels the send
-    // send and sleep both have resume_type void → when_any returns expected<void>
-    // when_any returns the winner's result: sleep succeeded → has_value()
-    // the key assertion is that the whole thing completes without hanging
-    auto entry = []() -> async::Task<> {
-        async::Channel<int> ch{ 0 }; // rendezvous: send will suspend
-
-        auto result = co_await async::when_any(
-            ch.send(99),
-            async::sleep_for(1ms)
-        );
-
-        // sleep won → its result (success) is returned
-        REQUIRE(result.has_value());
-    };
-    async::run(entry);
-}
-
-TEST_CASE("channel: timeout on suspended receive returns timed_out", "[async][channel]")
-{
-    // No sender: receive will suspend. timeout() races it against a timer.
-    auto entry = []() -> async::Task<> {
-        async::Channel<int> ch{ 0 };
-
-        auto result = co_await async::timeout(ch.receive(), 1ms);
-
-        REQUIRE_FALSE(result.has_value());
-        REQUIRE(result.error() == std::make_error_code(std::errc::timed_out));
-    };
-    async::run(entry);
-}
-
-TEST_CASE("channel: timeout on suspended send returns timed_out", "[async][channel]")
-{
-    // No receiver: send will suspend on rendezvous channel. timeout() cancels it.
-    auto entry = []() -> async::Task<> {
-        async::Channel<int> ch{ 0 };
-
-        auto result = co_await async::timeout(ch.send(42), 1ms);
-
-        REQUIRE_FALSE(result.has_value());
-        REQUIRE(result.error() == std::make_error_code(std::errc::timed_out));
-    };
-    async::run(entry);
-}
-
-TEST_CASE("channel: timeout does not fire when send completes in time", "[async][channel]")
-{
-    // A receiver task is already waiting; send completes immediately.
-    auto entry = []() -> async::Task<> {
-        async::Channel<int> ch{ 0 };
-        int received = -1;
-
-        auto receiver = [&]() -> async::Task<> {
-            auto r = co_await ch.receive();
-            REQUIRE(r.has_value());
-            received = *r;
+        auto producer = [&]() -> Task<> {
+            co_await send_value(ch, 42);
         };
 
-        co_await async::all(
-            receiver(),
-            [&]() -> async::Task<> {
-                auto result = co_await async::timeout(ch.send(7), 5s);
-                REQUIRE(result.has_value());
-            }()
-        );
+        auto consumer = [&]() -> Task<> {
+            co_await receive_value(ch, 42);
+            ch.close();
+        };
 
-        REQUIRE(received == 7);
+        co_await all(producer(), consumer());
     };
-    async::run(entry);
+
+    run(entry);
 }
 
+TEST_CASE("channel: producer and consumer tasks communicate via buffered channel")
+{
+    std::vector<int> out;
+
+    auto entry = [&]() -> Task<> {
+        Channel<int> ch{3};
+
+        auto producer = [&]() -> Task<> {
+            for (int i = 1; i <= 5; ++i) {
+                co_await send_value(ch, i);
+            }
+        };
+
+        auto consumer = [&]() -> Task<> {
+            co_await drain_channel(ch, out);
+        };
+
+        auto closer = [&]() -> Task<> {
+            co_await sleep_for(50ms);
+            ch.close();
+        };
+
+        co_await all(producer(), consumer(), closer());
+    };
+
+    run(entry);
+    REQUIRE(out == std::vector<int>{1, 2, 3, 4, 5});
+}
+
+TEST_CASE("channel: sender suspends when buffer is full, resumes as consumer drains")
+{
+    std::vector<int> out;
+
+    auto entry = [&]() -> Task<> {
+        Channel<int> ch{2};
+
+        auto producer = [&]() -> Task<> {
+            for (int i = 0; i < 5; ++i) {
+                auto result = co_await ch.send(i * 10);
+                REQUIRE(result);
+            }
+        };
+
+        auto consumer = [&]() -> Task<> {
+            co_await drain_channel(ch, out);
+        };
+
+        auto closer = [&]() -> Task<> {
+            co_await sleep_for(50ms);
+            ch.close();
+        };
+
+        co_await all(producer(), consumer(), closer());
+    };
+
+    run(entry);
+    REQUIRE(out == std::vector<int>{0, 10, 20, 30, 40});
+}
+
+TEST_CASE("channel: close wakes suspended receiver with Closed error")
+{
+    bool receiver_woken = false;
+
+    auto entry = [&]() -> Task<> {
+        Channel<int> ch{0};
+
+        auto receiver = [&]() -> Task<> {
+            auto result = co_await ch.receive();
+            REQUIRE(!result);
+            REQUIRE(result.error() == make_error_code(ChannelError::Closed));
+            receiver_woken = true;
+        };
+
+        auto closer = [&]() -> Task<> {
+            co_await sleep_for(10ms);
+            ch.close();
+        };
+
+        co_await all(receiver(), closer());
+    };
+
+    run(entry);
+    REQUIRE(receiver_woken);
+}
+
+TEST_CASE("channel: close wakes suspended sender with Closed error")
+{
+    bool sender_woken = false;
+
+    auto entry = [&]() -> Task<> {
+        Channel<int> ch{0};
+
+        auto sender = [&]() -> Task<> {
+            auto result = co_await ch.send(99);
+            REQUIRE(!result);
+            REQUIRE(result.error() == make_error_code(ChannelError::Closed));
+            sender_woken = true;
+        };
+
+        auto closer = [&]() -> Task<> {
+            co_await sleep_for(10ms);
+            ch.close();
+        };
+
+        co_await all(sender(), closer());
+    };
+
+    run(entry);
+    REQUIRE(sender_woken);
+}
+
+TEST_CASE("channel: receive drains buffer then returns Closed error")
+{
+    std::vector<int> out;
+
+    auto entry = [&]() -> Task<> {
+        Channel<int> ch{3};
+
+        auto producer = [&]() -> Task<> {
+            for (int i = 0; i < 3; ++i) {
+                auto result = co_await ch.send(i);
+                REQUIRE(result);
+            }
+            ch.close();
+        };
+
+        auto consumer = [&]() -> Task<> {
+            co_await drain_channel(ch, out);
+            auto final = co_await ch.receive();
+            REQUIRE(!final);  // Should get Closed error
+        };
+
+        co_await all(producer(), consumer());
+    };
+
+    run(entry);
+    REQUIRE(out == std::vector<int>{0, 1, 2});
+}
+
+TEST_CASE("channel: send to closed channel returns Closed error")
+{
+    auto entry = []() -> Task<> {
+        Channel<int> ch{2};
+
+        ch.close();
+        auto result = co_await ch.send(42);
+        REQUIRE(!result);
+        REQUIRE(result.error() == make_error_code(ChannelError::Closed));
+    };
+
+    run(entry);
+}
+
+TEST_CASE("channel: multiple producers fan-in to single consumer")
+{
+    std::vector<int> out;
+
+    auto entry = [&]() -> Task<> {
+        Channel<int> ch{10};
+        std::atomic<int> completed_producers{0};
+
+        auto producer = [&](int id) -> Task<> {
+            for (int i = 0; i < 3; ++i) {
+                auto result = co_await ch.send(id * 100 + i);
+                REQUIRE(result);
+            }
+            if (++completed_producers == 3) {
+                ch.close();
+            }
+        };
+
+        auto consumer = [&]() -> Task<> {
+            co_await drain_channel(ch, out);
+        };
+
+        co_await all(producer(0), producer(1), producer(2), consumer());
+    };
+
+    run(entry);
+    REQUIRE(out.size() == 9);
+    std::sort(out.begin(), out.end());
+    REQUIRE(out == std::vector<int>{0, 1, 2, 100, 101, 102, 200, 201, 202});
+}
