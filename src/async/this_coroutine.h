@@ -6,17 +6,12 @@
 namespace async::this_coroutine {
 
 /**
- * @brief Return the `IOContext` bound to the current thread.
+ * @brief Return the `IOContext` associated with the current thread.
  *
- * Each thread that calls `async::run()` owns a thread-local `IOContext`
- * created on first access. This function provides a stable reference to
- * that instance for use as default arguments in socket and awaiter
- * constructors, removing the need to explicitly thread `IOContext&`
- * through every call site.
+ * If an `IOContext` is currently running on this thread (via `async::run()`),
+ * returns that bound instance. Otherwise returns the thread's dedicated
+ * `IOContext`, which is lazily created on first access.
  *
- * @note The context is thread-local and initialized on first access. For correct
- *       event-loop behavior it should be driven by `async::run()` before I/O operations
- *       are submitted.
  * @return Reference to the calling thread's `IOContext`.
  */
 auto context() -> IOContext&;
@@ -43,6 +38,36 @@ auto setup_buffer_ring(unsigned entries, unsigned size = 4096) -> unsigned;
  * @param new_entries Desired submission queue depth (must be a power of two).
  */
 void setup_entries(unsigned new_entries);
+
+/**
+ * @brief RAII guard that binds an `IOContext` as the active context for the current thread.
+ *
+ * On construction, records the previously bound context and installs the new one
+ * so that `this_coroutine::context()` returns it for the duration of the guard's
+ * lifetime. The previous binding is restored on destruction.
+ *
+ * Two construction modes:
+ * - `ContextBinder()` — lazily obtains (or creates) this thread's dedicated
+ *   `IOContext` and binds it. Used by `async::run()`.
+ * - `ContextBinder(IOContext&)` — binds the given context explicitly.
+ *   Used by `IOContext::run()`.
+ */
+class ContextBinder {
+public:
+    ContextBinder() noexcept;
+    explicit ContextBinder(IOContext& ctx) noexcept;
+
+    ContextBinder(const ContextBinder&) = delete;
+    auto operator=(const ContextBinder&) -> ContextBinder& = delete;
+
+    ~ContextBinder() noexcept;
+
+    [[nodiscard]] auto context() noexcept -> IOContext& { return *context_; }
+
+private:
+    IOContext* context_;
+    IOContext* previous_;
+};
 
 } // namespace async::this_coroutine
 

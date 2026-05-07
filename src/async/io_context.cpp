@@ -7,11 +7,14 @@
 
 #include <common.h>
 #include <operation.h>
+#include <this_coroutine.h>
 
 namespace async {
 
 void IOContext::run()
 {
+    this_coroutine::ContextBinder binder{ *this };
+
     while (tracking_operations_.load(std::memory_order_relaxed) > 0) {
         // 如果用户调用了stop()，就取消所有未完成的操作
         if (should_stop_.load(std::memory_order_relaxed)) {

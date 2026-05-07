@@ -8,14 +8,39 @@ namespace {
 
 unsigned entries = 1024;
 
+thread_local IOContext* bound_context = nullptr;
+
 } // namespace
 
 
 auto context() -> IOContext&
 {
-    // 每个线程都有一个IOContext实例，第一次调用时创建；后续调用返回同一个实例的引用
-    thread_local auto context = std::make_unique<IOContext>(entries);
-    return *context;
+    if (bound_context)
+        return *bound_context;
+    
+    // 没有绑定的上下文，创建一个线程专用的IOContext并绑定
+    // 但是这个context不会被实际使用，在context::run的时候，会被ContextBinder替换掉
+    thread_local auto ctx = std::make_unique<IOContext>(entries);
+    return *ctx;
+}
+
+ContextBinder::ContextBinder() noexcept
+{
+    thread_local auto ctx = std::make_unique<IOContext>(entries);
+    context_ = ctx.get();
+    previous_ = bound_context;
+    bound_context = context_;
+}
+
+ContextBinder::ContextBinder(IOContext& ctx) noexcept
+    : context_{ &ctx }, previous_{ bound_context }
+{
+    bound_context = &ctx;
+}
+
+ContextBinder::~ContextBinder() noexcept
+{
+    bound_context = previous_;
 }
 
 auto setup_buffer_ring(unsigned entries, unsigned size) -> unsigned

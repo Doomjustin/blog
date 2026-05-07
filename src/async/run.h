@@ -60,9 +60,10 @@ template<typename Awaiter, typename... Args>
              (std::copy_constructible<Args> && ...)
 void run(Awaiter&& awaiter, Args&&... args) 
 {
-    detail::ContextGuard guard{ this_coroutine::context() };
-    co_spawn(std::invoke(awaiter, args...));
-    this_coroutine::context().run();
+    this_coroutine::ContextBinder binder;
+    detail::ContextGuard guard{ binder.context() };
+    co_spawn(std::invoke(awaiter, args...), binder.context());
+    binder.context().run();
 }
 
 /**
@@ -88,9 +89,10 @@ void run(std::integral auto thread_count, Awaiter&& awaiter, Args&&... args)
     for (int i = 1; i < thread_count; ++i) {
         threads.emplace_back([awaiter, args...]() mutable -> void 
         {
-            detail::ContextGuard guard{ this_coroutine::context() };
-            co_spawn(std::invoke(awaiter, args...));
-            this_coroutine::context().run();
+            this_coroutine::ContextBinder binder;
+            detail::ContextGuard guard{ binder.context() };
+            co_spawn(std::invoke(awaiter, args...), binder.context());
+            binder.context().run();
         });
     }
 
