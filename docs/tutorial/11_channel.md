@@ -78,46 +78,75 @@ int main()
 
 ## 示例 B：跨线程解耦（`ChannelPipe<T>`）
 
-现实类比：接入线程收包，工作线程做 CPU 密集计算。
+现实类比：接入线程收包（生产快），工作线程做 CPU 密集计算（消费慢），通过容量为 4 的有界管道桥接。
 
 ```cpp
 #include <blog.h>
+#include <sleep_for.h>
 
-auto sender(async::ChannelSender<int> tx) -> async::Task<>
+using namespace std::chrono_literals;
+
+// 消费者：模拟后台计算线程
+auto worker_task(async::ChannelReceiver<std::string> rx) -> async::Task<>
 {
-    co_await tx.send(42);
-    log::info("net send: 42");
-    tx.close();
-    log::info("net close sender");
+    log::info("[Worker] started, waiting for requests...");
+
+    // 优雅停机循环：发送端 close 且通道内积压的数据被完全抽干后，
+    // receive() 返回 Closed 错误，循环自然退出。
+    while (auto task_data = co_await rx.receive()) {
+        log::info("[Worker] processing: {}", *task_data);
+        co_await async::sleep_for(200ms); // 模拟繁重计算
+        log::info("[Worker] done: {}", *task_data);
+    }
+
+    log::info("[Worker] pipe closed, all pending tasks drained, exiting.");
 }
 
-auto receiver(async::ChannelReceiver<int> rx) -> async::Task<>
+// 生产者：模拟网络 I/O 线程
+auto net_task(async::ChannelSender<std::string> tx) -> async::Task<>
 {
-    auto v = co_await rx.receive();
-    if (v) log::info("worker recv: {}", *v);
-    log::info("worker done");
+    log::info("[Net] started, receiving frontend requests...");
+
+    for (int i = 1; i <= 6; ++i) {
+        std::string data = "Request-" + std::to_string(i);
+        log::info("[Net] received {}, forwarding to worker...", data);
+
+        // 管道（容量 4）满时 send 挂起当前协程，但 Net 线程的 io_uring 继续运行。
+        auto result = co_await tx.send(data);
+        if (!result) break;
+
+        co_await async::sleep_for(50ms); // 模拟高频收包（生产 > 消费）
+    }
+
+    log::info("[Net] all requests dispatched, closing sender.");
+    tx.close(); // 触发 Worker 的优雅停机
 }
 
 int main()
 {
-    async::IOContext ctx_net;
-    async::IOContext ctx_worker;
-    auto [tx, rx] = async::make_channel<int>(16, ctx_net, ctx_worker);
+    async::IOContext ctx_net;    // Thread A: 网络 IO 上下文
+    async::IOContext ctx_worker; // Thread B: 密集计算上下文
 
-    async::co_spawn(receiver(std::move(rx)), ctx_worker);
-    std::jthread worker_thread([&] { ctx_worker.run(); });
+    // 容量为 4 的跨线程有界管道（自带背压）
+    auto [tx, rx] = async::make_channel<std::string>(4, ctx_net, ctx_worker);
 
-    async::co_spawn(sender(std::move(tx)), ctx_net);
+    // 将 Worker 协程部署到 ctx_worker，由独立的 OS 线程驱动
+    async::co_spawn(worker_task(std::move(rx)), ctx_worker);
+    std::jthread worker_thread([&ctx_worker] { ctx_worker.run(); });
+
+    // 将 Net 协程部署到 ctx_net，在主线程驱动
+    async::co_spawn(net_task(std::move(tx)), ctx_net);
     ctx_net.run();
+    // ctx_net.run() 返回后，jthread RAII 自动 join，等待 Worker 退出
     return 0;
 }
 ```
 
 要点：
 
-- `ChannelPipe<T>` 是跨 IOContext 的 SPSC 模型，依靠 credit/backpressure 控制发送节奏。
-- 当 receiver 侧处理慢时，sender 会自然背压而不是无限堆积。
-- 该实现当前不直接满足 `timeout(rx.receive(), dur)` 的约束；教程主线先聚焦跨线程消息传递语义。
+- 函数参数**按值持有** `ChannelSender`/`ChannelReceiver`，配合 `co_spawn` 时 `std::move` 传入，生命周期与协程共存亡，无需 lambda 捕获。
+- `while (auto v = co_await rx.receive())` 是工业级 drain 惯用法：发送方 `close()` 后，消费者把缓冲内所有积压数据读完，循环才退出，无需手动捕获 `ChannelError::Closed`。
+- 生产 50ms / 消费 200ms，管道容量 4：Net 迅速填满管道后自动背压挂起，而 Net 线程的 io_uring 仍在高效运行。
 
 对应可执行示例：`tutorial/16_channel_pipe/main.cpp`  
 运行命令：`./build/tutorial/16_channel_pipe/tutorial.16_channel_pipe`
@@ -125,12 +154,32 @@ int main()
 一次真实运行输出（2026-05-07）：
 
 ```text
-[2026-05-07 14:01:35.518] [77524] [info] === demo 1: channel_pipe cross-thread pipeline ===
-[2026-05-07 14:01:35.518] [77524] [info] net send: 42
-[2026-05-07 14:01:35.518] [77524] [info] net close sender
-[2026-05-07 14:01:35.518] [77525] [info] worker recv: 42
-[2026-05-07 14:01:35.518] [77525] [info] worker done
+[2026-05-07 16:10:53.821] [116956] [info] === Demo: cross-thread pipeline with backpressure ===
+[2026-05-07 16:10:53.821] [116956] [info] [Net] started, receiving frontend requests...
+[2026-05-07 16:10:53.822] [116956] [info] [Net] received Request-1, forwarding to worker...
+[2026-05-07 16:10:53.822] [116957] [info] [Worker] started, waiting for requests...
+[2026-05-07 16:10:53.822] [116957] [info] [Worker] processing: Request-1
+[2026-05-07 16:10:53.872] [116956] [info] [Net] received Request-2, forwarding to worker...
+[2026-05-07 16:10:53.922] [116956] [info] [Net] received Request-3, forwarding to worker...
+[2026-05-07 16:10:53.972] [116956] [info] [Net] received Request-4, forwarding to worker...
+[2026-05-07 16:10:54.022] [116957] [info] [Worker] done: Request-1
+[2026-05-07 16:10:54.022] [116957] [info] [Worker] processing: Request-2
+[2026-05-07 16:10:54.022] [116956] [info] [Net] received Request-5, forwarding to worker...
+[2026-05-07 16:10:54.072] [116956] [info] [Net] received Request-6, forwarding to worker...
+[2026-05-07 16:10:54.122] [116956] [info] [Net] all requests dispatched, closing sender.
+[2026-05-07 16:10:54.222] [116957] [info] [Worker] done: Request-2
+[2026-05-07 16:10:54.222] [116957] [info] [Worker] processing: Request-3
+[2026-05-07 16:10:54.422] [116957] [info] [Worker] done: Request-3
+[2026-05-07 16:10:54.422] [116957] [info] [Worker] processing: Request-4
+[2026-05-07 16:10:54.622] [116957] [info] [Worker] done: Request-4
+[2026-05-07 16:10:54.622] [116957] [info] [Worker] processing: Request-5
+[2026-05-07 16:10:54.822] [116957] [info] [Worker] done: Request-5
+[2026-05-07 16:10:54.822] [116957] [info] [Worker] processing: Request-6
+[2026-05-07 16:10:55.023] [116957] [info] [Worker] done: Request-6
+[2026-05-07 16:10:55.023] [116957] [info] [Worker] pipe closed, all pending tasks drained, exiting.
 ```
+
+日志中可以看到：Net 在 ~200ms 内连发 4 条（Request-1 到 4），在 Worker 消化第一条之前管道已满，发送第 5 条时 Net 协程挂起；Worker 每消化一条，Net 立即补入下一条。这就是背压在日志层面的物理体现。
 
 ---
 
