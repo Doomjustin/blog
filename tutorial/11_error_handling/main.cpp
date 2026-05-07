@@ -1,165 +1,154 @@
 #include <chrono>
+#include <cstdlib>
+
+#include "exceptions.h"
 
 #include <blog.h>
 
-namespace {
-
 using namespace std::chrono_literals;
 
-/// 重试策略：最多重试 N 次，每次延长延迟
-auto retry_with_backoff(
-    std::function<async::Task<std::expected<void, std::error_code>>()> op,
-    std::size_t max_retries = 3,
-    std::chrono::milliseconds initial_delay = 100ms
+namespace {
+
+// ============================================================================
+// 核心范式：零开销的异步重试（Zero-Cost Async Retry）
+//
+// 使用模板 Action 接收任意可调用对象，编译器将其完全内联，
+// 无虚函数、无堆分配，不产生 std::function 的类型擦除开销。
+// ============================================================================
+template<typename Action>
+auto with_exponential_backoff(
+    Action&& action,
+    int max_retries = 3,
+    std::chrono::milliseconds initial_delay = 50ms
 ) -> async::Task<std::expected<void, std::error_code>>
 {
-    std::error_code last_error;
     auto delay = initial_delay;
+    std::error_code last_ec;
 
-    for (std::size_t attempt = 0; attempt <= max_retries; ++attempt) {
-        auto result = co_await op();
+    for (int attempt = 1; attempt <= max_retries; ++attempt) {
+        auto result = co_await action();
 
         if (result) {
-            log::info("attempt {}: success", attempt + 1);
-            co_return std::expected<void, std::error_code>{};
+            log::info("[Retry] 第 {} 次尝试成功！", attempt);
+            co_return result;
         }
 
-        last_error = result.error();
+        last_ec = result.error();
 
-        // 是否可重试的错误
-        bool is_retriable = (
-            last_error == std::errc::connection_refused ||
-            last_error == std::errc::connection_reset ||
-            last_error == std::errc::timed_out
+        // 错误分类：瞬态错误可重试，致命错误立刻熔断
+        bool is_transient = (
+            last_ec == std::errc::connection_refused ||
+            last_ec == std::errc::timed_out          ||
+            last_ec == std::errc::network_unreachable
         );
 
-        log::warning("attempt {}: error {} ({})",
-            attempt + 1,
-            last_error,
-            is_retriable ? "retriable" : "fatal"
-        );
-
-        if (!is_retriable || attempt == max_retries) {
-            co_return std::unexpected(last_error);
+        if (!is_transient) {
+            log::error("[Retry] 致命错误: {}，立刻熔断。", last_ec);
+            co_return std::unexpected(last_ec);
         }
 
-        log::info("retrying after {} ms", delay.count());
-        co_await async::sleep_for(delay);
-        delay *= 2;  // exponential backoff
+        if (attempt < max_retries) {
+            log::warning("[Retry] 瞬态错误: {}。等待 {}ms 后进行第 {} 次重试...",
+                         last_ec, delay.count(), attempt + 1);
+            co_await async::sleep_for(delay);
+            delay *= 2;  // 指数退避
+        }
     }
 
-    co_return std::unexpected(last_error);
+    log::error("[Retry] 已达最大重试次数 ({})，最终放弃。", max_retries);
+    co_return std::unexpected(last_ec);
 }
 
-/// 演示 1：区分错误类型
-auto demo_error_classification() -> async::Task<>
+// ============================================================================
+// 场景 1：微服务 RPC 指数退避重试
+// 模拟不稳定的下游服务：前 2 次连接被拒，第 3 次成功。
+// ============================================================================
+auto demo_rpc_retry() -> async::Task<>
 {
-    log::info("=== demo 1: error classification ===");
+    log::info("=== Demo 1: 微服务 RPC 指数退避重试 ===");
 
-    {
-        log::info("\ncase 1: operation_canceled (from stop_then)");
-        std::stop_source stop_src;
+    int attempt_count = 0;
 
-        // 模拟 100ms 后取消
-        std::jthread cancel_thread{ [&stop_src] {
-            std::this_thread::sleep_for(100ms);
-            stop_src.request_stop();
-        } };
-
-        auto result = co_await async::stop_then(
-            async::sleep_for(5s),
-            stop_src.get_token()
-        );
-
-        if (!result) {
-            if (result.error() == std::errc::operation_canceled)
-                log::info("error: operation_canceled (expected)");
-            else
-                log::error("error: {} (unexpected)", result.error());
-        }
-    }
-
-    {
-        log::info("\ncase 2: timed_out (from timeout)");
-        auto result = co_await async::timeout(
-            async::sleep_for(5s),
-            1s
-        );
-
-        if (!result) {
-            if (result.error() == std::errc::timed_out)
-                log::info("error: timed_out (expected)");
-            else
-                log::error("error: {} (unexpected)", result.error());
-        }
-    }
-}
-
-/// 演示 2：重试策略与错误分类
-auto demo_retry_strategy() -> async::Task<>
-{
-    log::info("\n=== demo 2: retry strategy ===");
-
-    std::size_t attempt_count = 0;
-
-    // 模拟一个操作：前 2 次连接被拒，第 3 次成功
-    auto flaky_operation = [&attempt_count]() -> async::Task<std::expected<void, std::error_code>>
+    auto flaky_rpc_call = [&]() -> async::Task<std::expected<void, std::error_code>> 
     {
         attempt_count++;
+        co_await async::sleep_for(10ms);  // 模拟网络延迟
 
-        if (attempt_count <= 2) {
-            co_return std::unexpected(std::make_error_code(std::errc::connection_refused));
-        }
+        if (attempt_count <= 2)
+            co_return unexpected_system_error(std::errc::connection_refused);
 
         co_return std::expected<void, std::error_code>{};
     };
 
-    auto result = co_await retry_with_backoff(flaky_operation, 5, 50ms);
+    auto result = co_await with_exponential_backoff(flaky_rpc_call, 5);
 
-    if (result) {
-        log::info("overall success after {} attempts", attempt_count);
-    }
-    else {
-        log::error("overall failure: {}", result.error());
-    }
+    if (result)
+        log::info("[Gateway] 业务请求最终完成，共尝试 {} 次。", attempt_count);
+    else
+        log::error("[Gateway] 全部重试耗尽: {}", result.error());
 }
 
-/// 演示 3：不可重试错误（协作取消）
-auto demo_fatal_errors() -> async::Task<>
+// ============================================================================
+// 场景 2：致命错误立刻熔断（permission_denied）
+// 鉴权失败属于不可恢复错误，重试 1000 次也没用，必须立刻返回。
+// ============================================================================
+auto demo_fatal_circuit_break() -> async::Task<>
 {
-    log::info("\n=== demo 3: non-retriable errors ===");
+    log::info("\n=== Demo 2: 致命错误立刻熔断 ===");
 
-    log::info("\ncase: operation_canceled should not retry");
-
-    std::size_t retry_count = 0;
-    std::stop_source stop_src;
-
-    // 立即取消
-    stop_src.request_stop();
-
-    auto operation = [&retry_count, &stop_src]() -> async::Task<std::expected<void, std::error_code>>
+    auto auth_fail_call = []() -> async::Task<std::expected<void, std::error_code>> 
     {
-        retry_count++;
-        auto result = co_await async::stop_then(
-            async::sleep_for(100ms),
-            stop_src.get_token()
-        );
-        co_return result ? std::expected<void, std::error_code>{} : std::unexpected(result.error());
+        co_await async::sleep_for(10ms);
+        co_return unexpected_system_error(std::errc::permission_denied);
     };
 
-    auto result = co_await retry_with_backoff(operation, 5, 10ms);
+    auto result = co_await with_exponential_backoff(auth_fail_call, 3);
 
-    log::info("total retry attempts: {} (should be 1, no retry on operation_canceled)",
-        retry_count);
+    if (!result)
+        log::info("[Gateway] 熔断机制生效（{}），快速向前端返回 HTTP 403。", result.error());
+}
+
+// ============================================================================
+// 场景 3：纯异步协作式取消（Pure Async Graceful Cancellation）
+// 用 co_spawn 在事件循环内发射后台协程触发取消，
+// 不消耗任何 OS 线程——这是 TPC 架构的正确做法。
+// ============================================================================
+auto demo_graceful_cancellation() -> async::Task<>
+{
+    log::info("\n=== Demo 3: 纯异步协作式取消 ===");
+
+    std::stop_source stop_src;
+
+    // 发射后台协程：100ms 后模拟用户点击"取消"按钮。
+    // stop_source 按值拷贝进协程帧，不存在任何生命周期风险。
+    async::co_spawn([](std::stop_source src) -> async::Task<> 
+    {
+        co_await async::sleep_for(100ms);
+        log::warning("[UI] 用户点击了取消按钮，触发 StopToken！");
+        src.request_stop();
+    }(stop_src));
+
+    log::info("[Downloader] 开始下载大文件（预计需要很久）...");
+
+    auto result = co_await async::stop_then(
+        async::sleep_for(10s),
+        stop_src.get_token()
+    );
+
+    if (!result) {
+        if (result.error() == std::errc::operation_canceled)
+            log::info("[Downloader] 收到取消信号，安全清理临时文件碎片。");
+        else
+            log::error("[Downloader] 发生 I/O 错误: {}", result.error());
+    }
 }
 
 } // namespace
 
 int main()
 {
-    async::run(demo_error_classification);
-    async::run(demo_retry_strategy);
-    async::run(demo_fatal_errors);
-
+    async::run(demo_rpc_retry);
+    async::run(demo_fatal_circuit_break);
+    async::run(demo_graceful_cancellation);
     return EXIT_SUCCESS;
 }

@@ -3,94 +3,84 @@
 
 #include <blog.h>
 
-namespace {
-
 using namespace std::chrono_literals;
 
-/// 演示 1：两个 endpoint 竞速，取先返回的
-///
-/// when_any 并发提交所有操作，第一个完成的"胜出"：
-///   - 返回胜者的结果（std::expected<void, error_code>）
-///   - 自动取消其余未完成的操作
-auto demo_any_endpoints() -> async::Task<>
-{
-    log::info("=== demo 1: compare two endpoints ===");
-    auto start = std::chrono::steady_clock::now();
+namespace {
 
-    // 模拟两个 endpoint：A 慢（300ms），B 快（100ms）
-    // when_any 取先完成的，另一个被自动取消
+// ============================================================================
+// 场景 1：Hedged Requests (高可用冗余请求)
+// 典型的尾延迟（Tail Latency）优化策略。向两个副本同时发起请求，
+// 只要最快的一个返回，立刻在 io_uring 层面对慢的那个下发 CANCEL SQE。
+// ============================================================================
+auto demo_hedged_requests() -> async::Task<>
+{
+    using namespace std::chrono;
+
+    log::info("=== Demo 1: 高可用冗余请求 (Hedged Requests) ===");
+    auto start = steady_clock::now();
+
+    // 真实场景中这里是向两个 Replica 节点发起 net::receive
     auto result = co_await async::when_any(
-        async::sleep_for(300ms),  // endpoint A
-        async::sleep_for(100ms)   // endpoint B（winner）
+        async::sleep_for(150ms),  // 节点 A：发生网络抖动，很慢
+        async::sleep_for(50ms)    // 节点 B：网络畅通，最快返回 (Winner)
     );
 
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - start);
+    auto ms = duration_cast<milliseconds>(steady_clock::now() - start).count();
 
     if (result)
-        log::info("winner responded in {}ms (expected ~100ms)", elapsed.count());
+        log::info("[Gateway] 冗余请求胜利！仅耗时 {}ms 拿到了数据。(慢节点已被自动 Cancel)", ms);
     else
-        log::error("both failed: {}", result.error());
+        log::error("[Gateway] 所有副本全部请求失败: {}", result.error());
 }
 
-/// 演示 2：三方竞速，取最快的
-///
-/// 返回值是胜者的 expected<void, error_code>，不是 tuple。
-/// 所有参数的 resume_type 必须相同（此处均为 void）。
-auto demo_any_three() -> async::Task<>
+// ============================================================================
+// 场景 2：SLA 保护线 (Primary I/O vs SLA Guard)
+// 主链路请求与 SLA 超时信号竞速。若主链路在时限内完成，直接使用结果；
+// 否则 SLA 保护线优先触发，主链路被取消并执行降级。
+// ============================================================================
+auto demo_heterogeneous_multiplexing() -> async::Task<>
 {
-    log::info("\n=== demo 2: compare three endpoints ===");
-    auto start = std::chrono::steady_clock::now();
+    log::info("\n=== Demo 2: SLA 抢占竞速 (Primary I/O vs SLA Guard) ===");
+    log::info("[Gateway] 主链路请求进行中，同时启用 SLA 保护线...");
 
-    // 三个"请求"，速度不同
     auto result = co_await async::when_any(
-        async::sleep_for(500ms),   // 慢
-        async::sleep_for(100ms),   // 最快（winner）
-        async::sleep_for(300ms)    // 中等
+        async::sleep_for(500ms),                    // 主链路 I/O（慢）
+        async::timeout(async::sleep_for(5s), 80ms) // SLA 保护线（快，通常触发超时）
     );
-
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - start);
 
     if (result)
-        log::info("fastest responded in {}ms (expected ~100ms)", elapsed.count());
+        log::info("[Gateway] 主链路在 SLA 内返回，继续主路径处理。");
     else
-        log::error("error: {}", result.error());
+        log::warning("[Gateway] SLA 保护线触发（{}），主链路被取消并执行降级。", result.error());
 }
 
-/// 演示 3：胜者失败时的行为
-///
-/// 如果最先返回的操作失败，when_any 照样返回该失败结果，
-/// 并取消其余操作。调用者通过检查 expected 来判断是否需要回退。
-auto demo_winner_fails() -> async::Task<>
+// ============================================================================
+// 场景 3：Deadline 熔断 (Poison Pill)
+// 长轮询请求与全局熔断 deadline 竞速。熔断信号一旦触发，
+// 挂起的慢链路立即被 Cancel，整个 coroutine 以错误码快速退出。
+// ============================================================================
+auto demo_poison_pill() -> async::Task<>
 {
-    log::info("\n=== demo 3: first to complete fails ===");
-    auto start = std::chrono::steady_clock::now();
+    log::info("\n=== Demo 3: Deadline Poison Pill (全局熔断) ===");
+    log::info("[Client] 客户端发起长轮询，请求可能挂起很久...");
 
-    // endpoint A：200ms 后超时失败
-    // endpoint B：500ms 后正常完成
-    // A 先完成（以失败告终），when_any 返回 A 的失败结果并取消 B
     auto result = co_await async::when_any(
-        async::timeout(async::sleep_for(5s), 200ms),  // A: 先完成，但超时失败
-        async::sleep_for(500ms)                        // B: 慢，被取消
+        async::sleep_for(10s),                           // 慢链路：可能长期挂起
+        async::timeout(async::sleep_for(5s), 100ms)     // 全局控制：100ms 熔断信号
     );
-
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - start);
 
     if (!result)
-        log::info("first to finish failed with {} at {}ms (expected ~200ms, timed_out)",
-            result.error(), elapsed.count());
+        log::info("[Client] 收到熔断信号（{}），长轮询已被瞬间打断。", result.error());
     else
-        log::info("unexpected success");
+        log::info("[Client] 长轮询正常结束。");
 }
 
 } // namespace
 
 int main()
 {
-    async::run(demo_any_endpoints);
-    async::run(demo_any_three);
-    async::run(demo_winner_fails);
+    async::run(demo_hedged_requests);
+    async::run(demo_heterogeneous_multiplexing);
+    async::run(demo_poison_pill);
     return EXIT_SUCCESS;
 }
