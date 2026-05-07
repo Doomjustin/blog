@@ -14,6 +14,7 @@
 #include <named_type.h>
 #include <overloads.h>
 #include <random.h>
+#include <spinlock.h>
 #include <tracking_resource.h>
 #include <utility.h>
 

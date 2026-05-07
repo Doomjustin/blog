@@ -21,6 +21,7 @@ namespace async {
 struct Operation: public MPSCQueueNode {
     Operation* prev{ nullptr };
     Operation* next{ nullptr };
+    int scheduled_result_{ 0 }; // result carried when op is routed via submit/post
     bool is_canceling_{ false };
     
     Operation() = default;

@@ -218,7 +218,7 @@ void IOContext::Scheduler::process_cross_thread_operations() noexcept
     auto* operation = cross_thread_operations_.pop_all();
     while (operation) {
         auto* next = static_cast<Operation*>(operation->mpsc_next.load(std::memory_order_relaxed));
-        operation->complete(0, 0);
+        operation->complete(operation->scheduled_result_, 0);
         operation = next;
     }
 }
@@ -229,7 +229,7 @@ void IOContext::Scheduler::process_local_operations() noexcept
     pending_operations.swap(local_operations_);
 
     for (auto* operation : pending_operations)
-        operation->complete(0, 0);
+        operation->complete(operation->scheduled_result_, 0);
 }
 
 IOContext::BufferRingGroup::~BufferRingGroup()
