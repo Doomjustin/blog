@@ -3,6 +3,7 @@
 
 #include <awaitable.h>
 #include <detached_task.h>
+#include <shift_to.h>
 
 namespace async {
 
@@ -24,6 +25,7 @@ template<awaitable Awaitable>
     requires std::movable<std::remove_cvref_t<Awaitable>>
 auto co_spawn(Awaitable awaitable, IOContext& context = this_coroutine::context()) -> DetachedTask
 {
+    co_await shift_to(context);
     co_await std::move(awaitable);
 }
 
