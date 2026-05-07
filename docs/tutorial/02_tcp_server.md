@@ -214,7 +214,7 @@ if (*recv_result == 0) {   // EOF：对端正常关闭
 }
 ```
 
-TCP 对端调用 `close()` 或 `shutdown(SHUT_WR)` 时，`recv` 返回 0 字节。这不是错误，而是正常的半关闭信号。必须显式检查，否则会对空 span 调用 `net::send` 形成死循环。
+TCP 对端调用 `close()` 或 `shutdown(SHUT_WR)` 时，接收操作返回 0 字节。这不是错误，而是正常的半关闭信号。必须显式检查，否则会对空 span 调用 `net::send` 形成死循环。
 
 ---
 

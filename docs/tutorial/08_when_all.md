@@ -163,6 +163,24 @@ t=200ms  C完成
 t=300ms  A完成  ← when_all 在此恢复协程
 ```
 
+```mermaid
+sequenceDiagram
+    participant C as 协程
+    participant W as when_all
+    participant R as io_uring
+
+    C->>W: co_await when_all(A(300ms), B(100ms), C(200ms))
+    W->>R: 提交 SQE-A
+    W->>R: 提交 SQE-B
+    W->>R: 提交 SQE-C
+    W-->>C: 挂起协程（pending=3）
+
+    R-->>W: CQE-B（100ms）pending=2
+    R-->>W: CQE-C（200ms）pending=1
+    R-->>W: CQE-A（300ms）pending=0
+    W-->>C: 恢复，返回 tuple(r_A, r_B, r_C)
+```
+
 三个操作总时间 **600ms**，实际等待时间 **300ms**（并发的代价只是最慢的那个）。
 
 ### 返回类型

@@ -1,6 +1,6 @@
 # 2.1 TCP 客户端：连接、发送与接收
 
-> **前置知识**：本章假设你已完成 2.1 节，服务端 `tutorial.05_tcp_server` 已编译。
+> **前置知识**：本章假设你已读完第 1 部分（1.1–1.4），理解 `Task<>`、`co_await`、`std::expected` 与 `co_spawn`。
 
 ---
 
@@ -28,7 +28,8 @@ auto client() -> async::Task<>
         co_return;
     }
 
-    log::info("connected to {}", endpoint);
+    if (auto local = local_endpoint(socket), remote = remote_endpoint(socket); local && remote)
+        log::info("connected {} -> {}", *local, *remote);
 
     // 3. 异步发送
     auto send_result = co_await net::send(socket, async::buffer(MESSAGE));
@@ -119,11 +120,11 @@ catch (const std::exception& ex) {
 
 `connect` 是**同步调用**，失败时抛 `std::system_error`。在调用点 catch、打 log 后 `co_return`，与后续 `co_await` 操作的错误处理风格保持一致——错误在发生处就地处理，不向上传播。
 
-`connect` 成功后，内核已完成端口绑定和路由。可以用 `local_endpoint` / `remote_endpoint` 查询本端和对端地址：
+`connect` 成功后，内核已完成端口绑定和路由。代码随后用 `local_endpoint` / `remote_endpoint` 查询并打印了本端和对端地址：
 
 ```cpp
 if (auto local = local_endpoint(socket), remote = remote_endpoint(socket); local && remote)
-    log::info("{}  ->  {}", *local, *remote);
+    log::info("connected {} -> {}", *local, *remote);
 ```
 
 两者均返回 `std::expected<endpoint_type, std::error_code>`。`local_endpoint` 反映内核自动分配的本地端口，`remote_endpoint` 反映已连接的对端地址，与构造 `endpoint` 时传入的值一致。
@@ -147,7 +148,7 @@ auto recv_result = co_await net::receive(socket, async::buffer(buf));
 
 `net::receive` 是**全量接收**：读满缓冲区或出错为止。这里分配了与消息等长的缓冲区，因为我们知道回显的确切大小。
 
-> `net::receive` vs `async_receive_some`：上一节服务端用的是 `async_receive_some`（单次、收多少算多少），客户端这里用 `net::receive`（读满为止）。两者适用场景不同——服务端处理未知长度的流式数据，客户端等待已知大小的回复。
+> `net::receive` vs `async_receive_some`：下一节（2.2）服务端用的是 `async_receive_some`（单次、收多少算多少），客户端这里用 `net::receive`（读满为止）。两者适用场景不同——服务端处理未知长度的流式数据，客户端等待已知大小的回复。
 
 ### EOF 检测
 
@@ -158,7 +159,7 @@ if (*recv_result == 0) {
 }
 ```
 
-服务端 `close()` 或 `shutdown(SHUT_WR)` 时，`recv` 返回 0。这是正常的半关闭信号，不是错误，需单独处理。
+服务端 `close()` 或 `shutdown(SHUT_WR)` 时，接收操作返回 0 字节。这是正常的半关闭信号，不是错误，需单独处理。
 
 ### 错误处理的形状
 

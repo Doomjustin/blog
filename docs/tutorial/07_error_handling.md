@@ -252,6 +252,19 @@ int main()
 | **网络故障** | `connection_refused`, `connection_reset` | 对端或网络出现问题 | 可重试（取决于协议语义） |
 | **协议错误** | `bad_message`, 应用自定义 | 数据本身有问题 | 不重试，报告错误 |
 
+```mermaid
+flowchart TD
+    E[收到 error_code] --> A{是 operation_canceled?}
+    A -- 是 --> Z[立即返回，向上传播]
+    A -- 否 --> B{是 timed_out 或网络故障?}
+    B -- 否 --> Y[不重试，报告错误]
+    B -- 是 --> C{重试次数 < max_retries?}
+    C -- 否 --> Y
+    C -- 是 --> D[等待退避延迟]
+    D --> E2[重新发起操作]
+    E2 --> E
+```
+
 ---
 
 ## 重试退避（Retry with Backoff）

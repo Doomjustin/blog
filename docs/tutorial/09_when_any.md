@@ -17,7 +17,7 @@ auto result = co_await async::when_any(op0, op1, op2);
 - 所有操作**同时**提交给 io_uring
 - 第一个返回 CQE 的操作"胜出"
 - 立即取消其余未完成的操作
-- 返回胜者的结果（`std::expected<R, error_code>`，不是 tuple）
+- 返回胜者的结果：同构时为 `expected<R, error_code>`，异构时为 `variant<expected<R0,E>, expected<R1,E>, ...>`（见后文）
 
 ---
 
@@ -61,8 +61,8 @@ auto demo_any_endpoints() -> async::Task<>
 
 /// 演示 2：三方竞速，取最快的
 ///
-/// 返回值是胜者的 expected<void, error_code>，不是 tuple。
-/// 所有参数的 resume_type 必须相同（此处均为 void）。
+/// 三个 sleep 的 resume_type 均为 void（同构路径），
+/// when_any 返回 expected<void, error_code>，直接检查。
 auto demo_any_three() -> async::Task<>
 {
     log::info("\n=== demo 2: compare three endpoints ===");
@@ -169,21 +169,81 @@ t=0ms    A(500), B(100), C(300)  开始
 t=100ms  B完成 ← 此时返回（耗时 100ms），A和C被取消
 ```
 
-### 返回值不是 tuple
+```mermaid
+sequenceDiagram
+    participant C as 协程
+    participant W as when_any
+    participant R as io_uring
 
-`when_any` 返回的是胜者的 `expected<R, error_code>`，而不是 tuple。这意味着：
+    C->>W: co_await when_any(A(500ms), B(100ms), C(300ms))
+    W->>R: 提交 SQE-A
+    W->>R: 提交 SQE-B
+    W->>R: 提交 SQE-C
+    W-->>C: 挂起协程
 
-- 所有参数的结果类型 `R` 必须相同（否则编译报错）
-- 返回值直接用，无需解构：
+    R-->>W: CQE-B（100ms，胜者）
+    W->>R: 提交 cancel SQE-A
+    W->>R: 提交 cancel SQE-C
+    R-->>W: CQE-A（operation_canceled）
+    R-->>W: CQE-C（operation_canceled）
+    W-->>C: 恢复，返回 B 的结果
+```
+
+### 同构路径 vs 异构路径
+
+`when_any` 的返回类型由参数决定：
+
+| 所有参数 `resume_type` | 返回类型 | 访问方式 |
+|----------------------|----------|---------|
+| **相同**（同构）| `expected<R, error_code>` | 直接用，无需解构 |
+| **不同**（异构）| `variant<expected<R0, E>, expected<R1, E>, ...>` | `.index()` 判断胜者，`std::get<I>` 取值 |
+
+**同构示例**（本章 demo 1、2、3 均属此类，resume_type 都是 `void`）：
+
+```cpp
+// 两个 sleep：resume_type 均为 void → 同构 → expected<void>
+auto result = co_await async::when_any(
+    async::sleep_for(300ms),
+    async::sleep_for(100ms)
+);
+if (result)
+    log::info("winner done");  // 直接检查 expected<void>
+```
+
+**异构示例**（参数返回类型不同）：
+
+```cpp
+// ch.receive() resume_type = int
+// sleep_for    resume_type = void
+// → 异构 → variant<expected<int, E>, expected<void, E>>
+auto result = co_await async::when_any(
+    ch.receive(),
+    async::sleep_for(1s)
+);
+
+if (result.index() == 0) {
+    // channel 先完成
+    auto& val = std::get<0>(result);
+    if (val) log::info("received: {}", *val);
+} else {
+    // sleep 先完成（超时）
+    log::warning("no message within 1s");
+}
+```
+
+`timeout(ch.receive(), 1s)` 是上面异构 `when_any` 的等价封装，推荐直接使用 `timeout` 而非手写 `when_any`。
 
 ```cpp
 // when_all：解构 tuple
 auto [r0, r1] = co_await async::when_all(op0, op1);
-if (r0 && r1) { ... }
 
-// when_any：直接使用
+// when_any（同构）：直接使用 expected
 auto result = co_await async::when_any(op0, op1);
 if (result) { ... }
+
+// when_any（异构）：按 index 分发
+auto result = co_await async::when_any(op0, op1);
+if (result.index() == 0) { ... }
 ```
 
 ### 胜者失败不等于整体失败
@@ -216,7 +276,8 @@ B（500ms）更慢 → 被取消，永远没有机会完成
 ## 本章小结
 
 - **`when_any` 取最快的**：所有操作并发提交，第一个返回的胜出，其余自动取消。
-- **返回胜者的 `expected<R,E>`**：不是 tuple，结果类型 `R` 必须对所有参数一致。
+- **同构路径**：所有参数 `resume_type` 相同时，返回 `expected<R, E>`，直接检查。
+- **异构路径**：参数 `resume_type` 不同时，返回 `variant<expected<R0, E>, expected<R1, E>, ...>`，用 `.index()` 识别胜者。
 - **胜者失败也算胜**：无论成功还是失败，第一个有结果的就返回。
 - **总耗时 = 最快的那个**：与 `when_all` 的"最慢的那个"相对。
 
