@@ -176,10 +176,17 @@ public:
 
     auto await_resume() -> std::expected<resume_type, std::error_code>
     {
-        auto result = inner_.await_resume();
-        if (result.index() == 1)
+        if (inner_.winner() == 1)
             return unexpected_system_error(std::errc::timed_out);
-        return std::get<0>(result);
+        // Op won. In the homogeneous (void) case await_resume() returns
+        // expected<void>; in the heterogeneous case it returns a variant —
+        // pull index 0 in that case.
+        if constexpr (std::is_void_v<resume_type>) {
+            return inner_.await_resume();
+        } else {
+            auto result = inner_.await_resume();
+            return std::get<0>(result);
+        }
     }
 
     auto context() noexcept -> decltype(auto) { return inner_.context(); }

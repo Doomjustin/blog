@@ -128,6 +128,10 @@ public:
         return std::get<0>(awaiters_).context();
     }
 
+    /** @brief Index of the first operation that completed, or -1 if none yet. */
+    [[nodiscard]]
+    auto winner() const noexcept -> int { return winner_; }
+
 private:
     /**
      * @brief Per-operation proxy that carries the awaiter index.
