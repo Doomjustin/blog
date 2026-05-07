@@ -95,16 +95,6 @@ int main()
 }
 ```
 
-## 示例
-
-完整导读与 20 个示例索引见：[docs/examples/README.md](docs/examples/README.md)
-
-代表性示例：
-
-- 入门： [hello_coroutine](docs/examples/01_hello_coroutine.md)
-- 韧性请求： [stop_then_resilient](docs/examples/12_stop_then_resilient.md)
-- 生产骨架： [graceful_shutdown_server](docs/examples/19_graceful_shutdown_server.md)
-
 ## 教程
 
 逐步学习 io_uring + C++23 协程网络编程：[docs/tutorial/README.md](docs/tutorial/README.md)
