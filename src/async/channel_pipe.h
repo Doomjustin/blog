@@ -303,7 +303,6 @@ struct PipeCore : std::enable_shared_from_this<PipeCore<T>> {
             op->core = this->shared_from_this();
 
             ps->ok_ = true;
-            receiver_ctx->add_work();
             receiver_ctx->post(op);
             ps->complete(0, 0);
         }
@@ -333,7 +332,6 @@ void DataOp<T>::complete(int res, std::uint32_t /*flags*/)
         if (res != -ECANCELED)
             local_core->on_credits_returned(this);
     } else {
-        local_core->receiver_ctx->drop_work();
         if (res != -ECANCELED)
             local_core->on_data_arrived(this);
     }
@@ -391,7 +389,6 @@ public:
             op->value.emplace(std::move(value_));
             op->core = core_;
             ok_ = true;
-            core_->receiver_ctx->add_work();
             core_->receiver_ctx->post(op);
             return true;
         }
