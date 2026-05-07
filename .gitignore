@@ -56,4 +56,4 @@ __pycache__/
 .venv/
 
 # customer
-**/config.cppm
+**/private/
