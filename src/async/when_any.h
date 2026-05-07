@@ -93,7 +93,12 @@ public:
     {
         handle_ = handle;
         set_parents(std::index_sequence_for<Awaiters...>{});
-        return arm_all(std::index_sequence_for<Awaiters...>{});
+        
+        is_suspending_ = true;
+        arm_all(std::index_sequence_for<Awaiters...>{});
+        is_suspending_ = false;
+        
+        return pending_ > 0;
     }
 
     /**
@@ -161,6 +166,8 @@ private:
     std::coroutine_handle<> handle_;
     int pending_{ static_cast<int>(sizeof...(Awaiters)) };
     int winner_{ -1 };
+    bool is_suspending_{ false };
+    bool is_canceling_losers_{ false };
 
     template<std::size_t... Is>
     void setup_slots(std::index_sequence<Is...> /*index*/) noexcept
@@ -175,19 +182,16 @@ private:
     }
 
     template<std::size_t... Is>
-    auto arm_all(std::index_sequence<Is...> /*index*/) noexcept -> bool
+    void arm_all(std::index_sequence<Is...> /*index*/) noexcept
     {
-        bool any_armed = false;
-        (..., arm_one<Is>(any_armed));
-
+        (..., arm_one<Is>());
+        
         if (winner_ >= 0)
             cancel_losers(static_cast<std::size_t>(winner_), std::index_sequence_for<Awaiters...>{});
-
-        return any_armed;
     }
 
     template<std::size_t I>
-    void arm_one(bool& any_armed) noexcept
+    void arm_one() noexcept
     {
         auto& awaiter = std::get<I>(awaiters_);
         if (awaiter.await_ready()) {
@@ -200,7 +204,6 @@ private:
 
         if (awaiter.await_suspend(handle_)) {
             armed_[I] = true;
-            any_armed = true;
             return;
         }
 
@@ -212,16 +215,24 @@ private:
 
     void on_slot_complete(std::size_t index, int result, std::uint32_t flags) noexcept
     {
+        bool is_first = false;
         if (winner_ < 0) {
             // First completion: record winner and cancel the other N-1 SQEs.
-            // Cancellation CQEs have null user-data so the event loop discards
-            // them; they do not affect the pending_ counter.
             winner_ = static_cast<int>(index);
-            cancel_losers(index, std::index_sequence_for<Awaiters...>{});
+            is_first = true;
+            is_canceling_losers_ = true;
         }
 
-        if (--pending_ == 0)
+        --pending_;
+
+        if (is_first) {
+            cancel_losers(index, std::index_sequence_for<Awaiters...>{});
+            is_canceling_losers_ = false;
+        }
+
+        if (pending_ == 0 && !is_canceling_losers_ && !is_suspending_) {
             this->resume(handle_, result, flags);
+        }
     }
 
     template<std::size_t... Is>

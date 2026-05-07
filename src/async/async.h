@@ -6,6 +6,7 @@
 #include <awaitable.h>
 #include <buffer.h>
 #include <channel.h>
+#include <channel_pipe.h>
 #include <co_spawn.h>
 #include <detached_task.h>
 #include <final_awaiter.h>

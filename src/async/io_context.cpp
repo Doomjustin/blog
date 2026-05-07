@@ -14,6 +14,7 @@ namespace async {
 void IOContext::run()
 {
     this_coroutine::ContextBinder binder{ *this };
+    thread_id_ = std::this_thread::get_id();
 
     while (tracking_operations_.load(std::memory_order_relaxed) > 0) {
         // 如果用户调用了stop()，就取消所有未完成的操作

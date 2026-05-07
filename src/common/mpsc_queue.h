@@ -34,7 +34,7 @@ public:
     auto operator=(MPSCQueue&&) -> MPSCQueue& = delete;
     ~MPSCQueue() = default;
 
-    void push(Node* node) noexcept
+    auto push(Node* node) noexcept -> bool
     {
         auto* expected = head_.load(std::memory_order_relaxed);
         do {
@@ -43,6 +43,8 @@ public:
                      expected, node,
                      std::memory_order_release,
                      std::memory_order_relaxed));
+
+        return expected == nullptr;
     }
 
     [[nodiscard]]

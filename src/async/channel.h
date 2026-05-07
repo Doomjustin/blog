@@ -130,6 +130,17 @@ public:
     ~Channel() { close(); }
 
     /**
+     * @brief Return the owning IOContext.
+     *
+     * Can be called safely before any coroutine operation starts.
+     */
+    [[nodiscard]]
+    auto context() const noexcept -> IOContext&
+    {
+        return *owner_ctx_;
+    }
+
+    /**
      * @brief Close the channel.
      *
      * Called only by owner thread. Wakes all suspended senders/receivers.
@@ -139,20 +150,23 @@ public:
     {
         assert(owner_ctx_->is_owner_thread() &&
                "Channel::close() must be called from the owner IOContext thread");
-        if (closed_)
-            return;
+        if (closed_) return;
+
         closed_ = true;
 
+        auto senders = std::exchange(waiting_senders_, {});
+        auto receivers = std::exchange(waiting_receivers_, {});
+
         // Drain and wake all waiters (owner thread context — no atomics needed)
-        while (!waiting_senders_.empty()) {
-            auto* op = waiting_senders_.pop_front();
+        while (!senders.empty()) {
+            auto* op = senders.pop_front();
             auto* sender = static_cast<SendAwaiter*>(op);
             sender->in_queue_ = false;
             wake_awaiter(sender, 0);  // 0 = success, ok_ remains false → Closed error
         }
 
-        while (!waiting_receivers_.empty()) {
-            auto* op = waiting_receivers_.pop_front();
+        while (!receivers.empty()) {
+            auto* op = receivers.pop_front();
             auto* receiver = static_cast<ReceiveAwaiter*>(op);
             receiver->in_queue_ = false;
             wake_awaiter(receiver, 0);  // 0 = success, ok_ remains false → Closed error
@@ -180,7 +194,7 @@ public:
         using resume_type = void;
 
         SendAwaiter(Channel& ch, T value)
-          : ch_{ ch }, value_{ std::move(value) }
+          : ch_{ ch }, ctx_{ &ch_.context() }, value_{ std::move(value) }
         {}
 
         [[nodiscard]]
@@ -232,7 +246,7 @@ public:
         using resume_type = std::expected<T, std::error_code>;
 
         explicit ReceiveAwaiter(Channel& ch) 
-          : ch_{ ch }
+          : ch_{ ch }, ctx_{ &ch_.context() }
         {}
 
         [[nodiscard]]

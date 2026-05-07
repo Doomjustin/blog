@@ -64,7 +64,9 @@ public:
     {
         handle_ = handle;
         setup_parents(std::index_sequence_for<Awaiters...>{});
-        return arm_all(std::index_sequence_for<Awaiters...>{});
+        arm_all(std::index_sequence_for<Awaiters...>{});
+        
+        return pending_ > 0;
     }
 
     /**
@@ -112,15 +114,13 @@ private:
     }
 
     template<std::size_t... Is>
-    auto arm_all(std::index_sequence<Is...> /*index*/) noexcept -> bool
+    void arm_all(std::index_sequence<Is...> /*index*/) noexcept
     {
-        bool any_armed = false;
-        (..., arm_one<Is>(any_armed));
-        return any_armed;
+        (..., arm_one<Is>());
     }
 
     template<std::size_t I>
-    void arm_one(bool& any_armed) noexcept
+    void arm_one() noexcept
     {
         auto& awaiter = std::get<I>(awaiters_);
         if (awaiter.await_ready()) {
@@ -130,7 +130,6 @@ private:
 
         if (awaiter.await_suspend(handle_)) {
             armed_[I] = true;
-            any_armed = true;
             return;
         }
 

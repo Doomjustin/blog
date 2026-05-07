@@ -252,8 +252,9 @@ private:
 
         void post(gsl::not_null<Operation*> operation) noexcept
         {
-            cross_thread_operations_.push(operation);
-            wakeup();
+            // 仅在队列从0->1时才手动唤醒
+            if (cross_thread_operations_.push(operation))
+                wakeup();
         }
 
         void submit(gsl::not_null<Operation*> operation) noexcept
