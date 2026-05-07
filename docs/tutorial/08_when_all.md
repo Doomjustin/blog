@@ -1,23 +1,12 @@
 # 4.1 显式状态聚合：`when_all`
 
 > **前置知识**：本章假设你已读完 Part 1–3（协程基础、网络 I/O、系统韧性）。
+> **源文件**：[tutorial/12_when_all/main.cpp](../../tutorial/12_when_all/main.cpp)
+> **下一节**：[4.2 竞速与抢占：when_any](09_when_any.md)
 
 ---
 
-## 并发的两种姿态
-
-在上一部分（Part 3）中，我们用 `co_await` 串行等待单个操作。很多情况下，多个操作之间没有依赖关系，可以**并发执行**，只需要在"所有操作都完成后"再收集结果。
-
-`when_all` 就是为此而生：
-
-```cpp
-auto [r0, r1, r2] = co_await async::when_all(op0, op1, op2);
-```
-
-- 三个操作**同时**提交给 io_uring
-- 当前协程挂起，等所有 CQE 都回来后才恢复
-- 返回 `tuple<expected<R0, error_code>, expected<R1, error_code>, ...>`
-- 元素顺序与参数顺序一一对应
+`when_all` 并发提交多个 I/O 操作，**全部完成后统一收敛结果**。与 Task 级并发不同，它直接操作底层 awaiter，适用于三类工业场景：全双工收发、Scatter-Gather 聚合、Quorum 多写。
 
 ---
 
@@ -29,89 +18,86 @@ auto [r0, r1, r2] = co_await async::when_all(op0, op1, op2);
 
 #include <blog.h>
 
-namespace {
-
 using namespace std::chrono_literals;
 
-/// 演示 1：等待所有操作完成，汇集结果
-///
-/// when_all 并发启动所有参数，挂起直到每一个都完成（或失败），
-/// 返回 tuple<expected...>，元素顺序与参数顺序一一对应。
-auto demo_when_all_basic() -> async::Task<>
+namespace {
+
+auto demo_full_duplex() -> async::Task<>
 {
-    log::info("=== demo 1: basic when_all ===");
+    log::info("=== Demo 1: 全双工并发 I/O (零内存分配) ===");
+
+    // 真实场景下这里会是 net::send(fd_out) 和 net::receive(fd_in)
+    // 我们用 sleep_for 模拟底层的 I/O 等待时间
     auto start = std::chrono::steady_clock::now();
 
-    // 三个"请求"并发执行（用 sleep_for 模拟不同延迟的 I/O）
-    auto [r0, r1, r2] = co_await async::when_all(
-        async::sleep_for(300ms),   // request A: 慢
-        async::sleep_for(100ms),   // request B: 快
-        async::sleep_for(200ms)    // request C: 中等
+    log::info("[Proxy] 正在同时发起网络转发与接收...");
+
+    auto [send_res, recv_res] = co_await async::when_all(  // <-- 并发投递两个操作
+        async::sleep_for(50ms),
+        async::sleep_for(150ms)
     );
 
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - start);
 
-    // 总耗时取决于最慢的那个（300ms），而不是三者之和（600ms）
-    log::info("all done in {}ms (expected ~300ms)", elapsed.count());
+    log::info("[Proxy] 全双工 I/O 结束，总耗时: {}ms (预期受限于最慢的 ~150ms)", ms.count());
 
-    // 每个返回值都是 std::expected<void, std::error_code>
-    if (r0 && r1 && r2)
-        log::info("all succeeded");
-    else
-        log::error("one or more failed");
+    // 独立检查每一条 I/O 链路的健康状态
+    if (send_res && recv_res) {
+        log::info("[Proxy] 数据转发与接收均成功！链路保持活跃。");
+    } else {
+        log::error("[Proxy] 链路发生异常中断。");
+    }
 }
 
-/// 演示 2：合并两个独立操作的结果
-///
-/// 两个请求各自产出数据，when_all 确保二者都完成后才合并。
-auto demo_merge_results() -> async::Task<>
+auto demo_sla_scatter_gather() -> async::Task<>
 {
-    log::info("\n=== demo 2: merge results ===");
-    auto start = std::chrono::steady_clock::now();
+    log::info("\n=== Demo 2: 带 SLA 熔断的并发拉取 (Partial Failure) ===");
 
-    // 并发发出两个"请求"；各自有自己的延迟
-    auto [fast, slow] = co_await async::when_all(
-        async::sleep_for(150ms),   // request 1
-        async::sleep_for(400ms)    // request 2
+    log::info("[Gateway] 开始并发请求 UserDB 和 ThirdPartyAPI...");
+
+    // 将不稳定的第三方调用包裹在 timeout 组合子里，与稳定的 DB 请求一起投递
+    auto [db_res, api_res] = co_await async::when_all(
+        async::sleep_for(100ms),
+        async::timeout(async::sleep_for(5s), 200ms)  // <-- 边缘服务 SLA 熔断
     );
 
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - start);
-
-    log::info("both requests done in {}ms (expected ~400ms)", elapsed.count());
-
-    // 只有双方都成功，才执行合并逻辑
-    if (!fast) {
-        log::error("request 1 failed: {}", fast.error());
-        co_return;
-    }
-    if (!slow) {
-        log::error("request 2 failed: {}", slow.error());
+    // 1. 处理核心数据 (必须成功)
+    if (db_res) {
+        log::info("[Gateway] UserDB 核心数据拉取成功！");
+    } else {
+        log::error("[Gateway] UserDB 拉取失败，触发致命级业务错误！");
         co_return;
     }
 
-    log::info("results merged successfully");
+    // 2. 处理边缘数据 (允许服务降级)
+    if (api_res) {
+        log::info("[Gateway] ThirdPartyAPI 数据拉取成功！");
+    } else if (api_res.error() == std::errc::timed_out) {
+        log::warning("[Gateway] ThirdPartyAPI 响应超时 (已熔断)，对该模块进行缓存降级处理。");
+    } else {
+        log::error("[Gateway] ThirdPartyAPI 发生其他底层错误: {}", api_res.error());
+    }
 }
 
-/// 演示 3：其中一个失败时的行为
-///
-/// when_all 不会因某个操作失败而中途取消其他操作；
-/// 所有操作运行完毕后，返回 tuple，调用者逐一检查各项结果。
-auto demo_partial_failure() -> async::Task<>
+auto demo_quorum_write() -> async::Task<>
 {
-    log::info("\n=== demo 3: partial failure ===");
+    log::info("\n=== Demo 3: 高可用并发双写 (Quorum Write) ===");
 
-    auto [r0, r1] = co_await async::when_all(
-        async::sleep_for(100ms),  // 正常完成
-        async::timeout(async::sleep_for(5s), 200ms)  // 超时失败
+    log::info("[Storage] 正在将区块数据并发刷入主备节点...");
+
+    auto [primary_res, backup_res] = co_await async::when_all(
+        async::sleep_for(80ms),
+        async::sleep_for(500ms)   // <-- 等待最慢的节点完成
     );
 
-    // r0 应该成功，r1 应该返回 timed_out
-    log::info("r0 ok={}, r1 ok={}", static_cast<bool>(r0), static_cast<bool>(r1));
-
-    if (!r1) {
-        log::info("r1 failed with: {} (expected timed_out)", r1.error());
+    // 等待全部完成后的多数派决议 (Quorum Consensus)
+    if (primary_res && backup_res) {
+        log::info("[Storage] 主备节点均写入成功，达成强一致性 (Strong Consistency)！");
+    } else if (primary_res || backup_res) {
+        log::warning("[Storage] 仅单个节点写入成功，警报：系统降级为弱一致性。");
+    } else {
+        log::error("[Storage] 主备节点全部写入失败！存在极高数据丢失风险！");
     }
 }
 
@@ -119,9 +105,9 @@ auto demo_partial_failure() -> async::Task<>
 
 int main()
 {
-    async::run(demo_when_all_basic);
-    async::run(demo_merge_results);
-    async::run(demo_partial_failure);
+    async::run(demo_full_duplex);
+    async::run(demo_sla_scatter_gather);
+    async::run(demo_quorum_write);
     return EXIT_SUCCESS;
 }
 ```
@@ -134,125 +120,71 @@ int main()
 ./build/tutorial/12_when_all/tutorial.12_when_all
 ```
 
-```
-[info] === demo 1: basic when_all ===
-[info] all done in 300ms (expected ~300ms)
-[info] all succeeded
+实际输出：
 
-[info] === demo 2: merge results ===
-[info] both requests done in 400ms (expected ~400ms)
-[info] results merged successfully
-
-[info] === demo 3: partial failure ===
-[info] r0 ok=true, r1 ok=false
-[info] r1 failed with: Connection timed out (expected timed_out)
+```text
+[2026-05-07 16:59:13.749] [131007] [info] === Demo 1: 全双工并发 I/O (零内存分配) ===
+[2026-05-07 16:59:13.749] [131007] [info] [Proxy] 正在同时发起网络转发与接收...
+[2026-05-07 16:59:13.899] [131007] [info] [Proxy] 全双工 I/O 结束，总耗时: 150ms (预期受限于最慢的 ~150ms)
+[2026-05-07 16:59:13.899] [131007] [info] [Proxy] 数据转发与接收均成功！链路保持活跃。
+[2026-05-07 16:59:13.899] [131007] [info]
+=== Demo 2: 带 SLA 熔断的并发拉取 (Partial Failure) ===
+[2026-05-07 16:59:13.899] [131007] [info] [Gateway] 开始并发请求 UserDB 和 ThirdPartyAPI...
+[2026-05-07 16:59:14.100] [131007] [info] [Gateway] UserDB 核心数据拉取成功！
+[2026-05-07 16:59:14.100] [131007] [warning] [Gateway] ThirdPartyAPI 响应超时 (已熔断)，对该模块进行缓存降级处理。
+[2026-05-07 16:59:14.100] [131007] [info]
+=== Demo 3: 高可用并发双写 (Quorum Write) ===
+[2026-05-07 16:59:14.100] [131007] [info] [Storage] 正在将区块数据并发刷入主备节点...
+[2026-05-07 16:59:14.600] [131007] [info] [Storage] 主备节点均写入成功，达成强一致性 (Strong Consistency) ！
 ```
 
 ---
 
-## 语义分析
+## 逐步解析
 
-### 时间收敛：并行 = 最慢的那个
+### 1. `when_all` 的执行模型
 
-```
-demo 1 的时间线：
+`when_all(op0, op1, ...)` 的关键是：
 
-t=0ms    A开始(300ms), B开始(100ms), C开始(200ms)  ← 同时提交
-t=100ms  B完成
-t=200ms  C完成
-t=300ms  A完成  ← when_all 在此恢复协程
-```
+1. 并发挂起/投递所有操作
+2. 等待所有操作结束
+3. 返回 `tuple<expected<...>, expected<...>, ...>`，顺序与参数顺序一致
 
 ```mermaid
 sequenceDiagram
-    participant C as 协程
+    participant C as Coroutine
     participant W as when_all
-    participant R as io_uring
+    participant R as io_uring / Scheduler
 
-    C->>W: co_await when_all(A(300ms), B(100ms), C(200ms))
-    W->>R: 提交 SQE-A
-    W->>R: 提交 SQE-B
-    W->>R: 提交 SQE-C
-    W-->>C: 挂起协程（pending=3）
+    C->>W: co_await when_all(opA, opB)
+    W->>R: arm opA
+    W->>R: arm opB
+    W-->>C: 挂起 (pending=2)
 
-    R-->>W: CQE-B（100ms）pending=2
-    R-->>W: CQE-C（200ms）pending=1
-    R-->>W: CQE-A（300ms）pending=0
-    W-->>C: 恢复，返回 tuple(r_A, r_B, r_C)
+    R-->>W: opA complete (pending=1)
+    R-->>W: opB complete (pending=0)
+    W-->>C: resume + return tuple(results)
 ```
 
-三个操作总时间 **600ms**，实际等待时间 **300ms**（并发的代价只是最慢的那个）。
+### 2. 适合什么场景
 
-### 返回类型
+1. 全双工：读写彼此独立，天然并发
+2. SLA 熔断：边缘服务超时可以降级，不阻塞核心路径
+3. Quorum 决议：必须收集全部结果再判断一致性级别
 
-```cpp
-// when_all 的返回类型推导
-auto [r0, r1, r2] = co_await async::when_all(
-    async::sleep_for(300ms),   // -> std::expected<void, std::error_code>
-    async::sleep_for(100ms),   // -> std::expected<void, std::error_code>
-    async::sleep_for(200ms)    // -> std::expected<void, std::error_code>
-);
-// 解构结果：r0, r1, r2 各为 std::expected<void, std::error_code>
-```
+### 3. 与 `all` 的边界
 
-如果操作返回值（例如 `recv` 返回字节数），`expected` 中就包含实际数据：
-
-```cpp
-// 假设 read_data() 返回 expected<std::span<std::byte>, error_code>
-auto [data_a, data_b] = co_await async::when_all(
-    read_data(socket_a),
-    read_data(socket_b)
-);
-
-if (data_a && data_b)
-    merge(*data_a, *data_b);  // 双方都成功才合并
-```
-
-### 失败不中止其他操作
-
-这一点与其他语言的实现不同：**`when_all` 不会因某个操作失败就取消其余操作**。所有操作都会运行到完成（或各自失败），然后一起返回。
-
-```
-demo 3 的时间线：
-
-t=0ms     r0开始(100ms),  r1开始(5s，但有200ms timeout)
-t=100ms   r0成功完成
-t=200ms   r1超时（timed_out）← when_all 现在才恢复（等了200ms，不是100ms）
-```
-
-即使 r0 在 100ms 就完成了，`when_all` 仍然等到 r1 也结束（无论成功还是失败）才继续。
-
----
-
-## `when_all` vs `all`：两个层次的并行
-
-`when_all` 和 `all` 都是"等所有操作完成"，但面向不同层次：
-
-| | `when_all` | `all` |
-|--|-----------|-------|
-| **接受类型** | `cancelable_operation`（I/O 操作） | `Task<>`（协程任务） |
-| **典型参数** | `sleep_for`、`recv`、`send`、`timeout` | 任意协程函数 |
-| **返回类型** | `tuple<expected<R,E>, ...>` | `void`（等所有 Task 完成） |
-| **取消机制** | io_uring 链接 SQE | `stop_token` 协作取消 |
-
-如果需要并发运行多个 `Task<>`，使用 `async::all`：
-
-```cpp
-co_await async::all(
-    worker("task-A", 120ms),
-    worker("task-B", 400ms),
-    worker("task-C", 260ms)
-);
-```
-
-`async::all` 与 `async::any` 将在 4.3 节（任务树的协作取消）详细介绍。
+| 组合器 | 层级 | 输入类型 | 典型用途 |
+|---|---|---|---|
+| `when_all` | operation 级 | awaitable operations | 并发 I/O 收敛 |
+| `all` | task 级 | `Task<>` | 协程任务树并发 |
 
 ---
 
 ## 本章小结
 
-- **`when_all` 并发等待**：同时提交所有操作，挂起直到全部完成。
-- **返回 `tuple<expected...>`**：调用者逐一检查各项结果，失败不中止其他操作。
-- **总时间 = 最慢的那个**：并发执行的代价只是等待最慢操作，而不是各操作耗时之和。
+- `when_all` 是 operation 级并发聚合，不是“计算线程池”工具。
+- 它适用于全双工、Scatter-Gather、Quorum Write 这类 I/O 主导场景。
+- 组合 `timeout` 可以实现局部失败隔离和服务降级。
 
-下一节：[4.2 竞速与抢占（when_any）](09_when_any.md) — 同一请求发给多个 endpoint，取先返回的。
+> **下一节**：[4.2 竞速与抢占：when_any](09_when_any.md)

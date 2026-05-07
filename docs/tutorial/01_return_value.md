@@ -92,6 +92,19 @@ co_return value;                    // 隐式构造 expected 的成功状态
 co_return std::unexpected{ "..." }; // 构造失败状态
 ```
 
+```mermaid
+flowchart TD
+    E[协程调用 parse_int]
+    E --> A{输入是否<br/>有效数字?}
+    A -- 是 --> B["co_return 42<br/>构造 expected: 成功态"]
+    A -- 否 --> C["co_return std::unexpected<br/>构造 expected: 失败态"]
+    B --> D["r.has_value() = true<br/>operator bool = true"]
+    C --> E2["r.has_value() = false<br/>operator bool = false"]
+    D --> F["*r 或 .value() 取得值"]
+    E2 --> G[".error() 取得错误码"]
+    F & G --> H[根据结果分支处理]
+```
+
 使用时通过 `operator bool` 判断，成功路径用 `operator*` 取值，失败路径用 `.error()` 取错误：
 
 ```cpp

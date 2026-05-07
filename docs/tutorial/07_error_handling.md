@@ -1,45 +1,14 @@
-# 3.3 机制对比、错误分类与组合
+# 3.3 错误分类、重试退避与优雅取消
 
-> **前置知识**：本章假设你已读完 [3.1（外部取消）](05_stop_then.md) 和 [3.2（局部时间约束）](06_timeout.md)。
+> **前置知识**：本章假设你已读完 [3.1（stop_then）](05_stop_then.md) 与 [3.2（timeout）](06_timeout.md)，理解 `std::expected`、`operation_canceled` 与 `timed_out` 的含义。
+> **源文件**：[tutorial/11_error_handling/main.cpp](../../tutorial/11_error_handling/main.cpp)
+> **下一节**：[4.1 显式状态聚合：when_all](08_when_all.md)
 
 ---
 
-## 对照示例：同一场景，两种机制
+`stop_then` 和 `timeout` 均以 `std::expected<R, std::error_code>` 返回错误。错误码本身携带了语义：`connection_refused` 说明对端暂不可达，可能过一会恢复；`permission_denied` 说明鉴权失败，重试无意义。构建高可用服务的关键，正是在类型层面对错误**分类**，并让分类结果驱动重试或熔断决策——而非对每个错误码各写一段 `if-else`。
 
-我们先用同一个场景来直观展示 `stop_then` 与 `timeout` 的语义差异：**中断一个 5 秒的睡眠**，分别用两种方式实现。
-
-### 用 `stop_then`：外部主动取消
-
-```cpp
-log::info("case 1: operation_canceled (from stop_then)");
-std::stop_source stop_src;
-
-// 200ms 后由外部线程请求取消
-std::jthread cancel_thread{ [&stop_src] {
-    std::this_thread::sleep_for(200ms);
-    stop_src.request_stop();
-} };
-
-auto result = co_await async::stop_then(
-    async::sleep_for(5s),
-    stop_src.get_token()
-);
-// result.error() == std::errc::operation_canceled
-```
-
-### 用 `timeout`：时间到期自动中断
-
-```cpp
-log::info("case 2: timed_out (from timeout)");
-
-auto result = co_await async::timeout(
-    async::sleep_for(5s),
-    1s              // 1 秒后自动中断
-);
-// result.error() == std::errc::timed_out
-```
-
-两者都提前结束了 5 秒的睡眠，但错误码不同，触发方式也完全不同。
+本章演示三个场景，共用一套 `with_exponential_backoff` 模板函数。
 
 ---
 
@@ -47,292 +16,228 @@ auto result = co_await async::timeout(
 
 ```cpp
 #include <chrono>
+#include <cstdlib>
 
 #include <blog.h>
 
-namespace {
-
 using namespace std::chrono_literals;
 
-// --- 辅助：重试策略 ---
+namespace {
 
-auto retry_with_backoff(
-    std::function<async::Task<std::expected<void, std::error_code>>()> op,
-    std::size_t max_retries = 3,
-    std::chrono::milliseconds initial_delay = 100ms
+template<typename Action>
+auto with_exponential_backoff(
+    Action&& action,
+    int max_retries = 3,
+    std::chrono::milliseconds initial_delay = 50ms
 ) -> async::Task<std::expected<void, std::error_code>>
 {
-    std::error_code last_error;
     auto delay = initial_delay;
+    std::error_code last_ec;
 
-    for (std::size_t attempt = 0; attempt <= max_retries; ++attempt) {
-        auto result = co_await op();
+    for (int attempt = 1; attempt <= max_retries; ++attempt) {
+        auto result = co_await action();
 
         if (result) {
-            log::info("attempt {}: success", attempt + 1);
-            co_return std::expected<void, std::error_code>{};
+            log::info("[Retry] 第 {} 次尝试成功！", attempt);
+            co_return result;
         }
 
-        last_error = result.error();
+        last_ec = result.error();
 
-        bool is_retriable = (
-            last_error == std::errc::connection_refused ||
-            last_error == std::errc::connection_reset ||
-            last_error == std::errc::timed_out
+        bool is_transient = (
+            last_ec == std::errc::connection_refused ||
+            last_ec == std::errc::timed_out          ||
+            last_ec == std::errc::network_unreachable
         );
 
-        log::warning("attempt {}: error {} ({})",
-            attempt + 1, last_error, is_retriable ? "retriable" : "fatal");
+        if (!is_transient) {                                            // <-- 致命错误：立刻熔断
+            log::error("[Retry] 致命错误: {}，立刻熔断。", last_ec);
+            co_return std::unexpected(last_ec);
+        }
 
-        if (!is_retriable || attempt == max_retries)
-            co_return std::unexpected(last_error);
-
-        log::info("retrying after {}ms", delay.count());
-        co_await async::sleep_for(delay);
-        delay *= 2;
+        if (attempt < max_retries) {
+            log::warning("[Retry] 瞬态错误: {}。等待 {}ms 后进行第 {} 次重试...",
+                         last_ec, delay.count(), attempt + 1);
+            co_await async::sleep_for(delay);
+            delay *= 2;                                                  // <-- 指数退避
+        }
     }
 
-    co_return std::unexpected(last_error);
+    log::error("[Retry] 已达最大重试次数 ({})，最终放弃。", max_retries);
+    co_return std::unexpected(last_ec);
 }
 
-// --- 演示 1：机制对比 ---
-
-auto demo_contrast() -> async::Task<>
+auto demo_rpc_retry() -> async::Task<>
 {
-    log::info("=== demo 1: stop_then vs timeout ===");
+    log::info("=== Demo 1: 微服务 RPC 指数退避重试 ===");
 
-    // Case A: 外部取消（stop_then）
-    {
-        log::info("\ncase A: operation_canceled (stop_then)");
-        std::stop_source stop_src;
-        std::jthread cancel_thread{ [&stop_src] {
-            std::this_thread::sleep_for(200ms);
-            stop_src.request_stop();
-        } };
+    int attempt_count = 0;
 
-        auto result = co_await async::stop_then(
-            async::sleep_for(5s), stop_src.get_token());
-
-        if (!result && result.error() == std::errc::operation_canceled)
-            log::info("canceled externally at 200ms (as expected)");
-    }
-
-    // Case B: 时间到期（timeout）
-    {
-        log::info("\ncase B: timed_out (timeout)");
-
-        auto result = co_await async::timeout(
-            async::sleep_for(5s), 1s);
-
-        if (!result && result.error() == std::errc::timed_out)
-            log::info("timed out at 1s (as expected)");
-    }
-}
-
-// --- 演示 2：重试策略与错误分类 ---
-
-auto demo_retry() -> async::Task<>
-{
-    log::info("\n=== demo 2: retry strategy ===");
-
-    std::size_t attempt_count = 0;
-
-    // 前 2 次失败，第 3 次成功
-    auto flaky_op = [&attempt_count]() -> async::Task<std::expected<void, std::error_code>>
-    {
+    auto flaky_rpc_call = [&]() -> async::Task<std::expected<void, std::error_code>> {
         attempt_count++;
+        co_await async::sleep_for(10ms);
+
         if (attempt_count <= 2)
             co_return std::unexpected(std::make_error_code(std::errc::connection_refused));
+
         co_return std::expected<void, std::error_code>{};
     };
 
-    auto result = co_await retry_with_backoff(flaky_op, 5, 50ms);
+    auto result = co_await with_exponential_backoff(flaky_rpc_call, 5);
 
     if (result)
-        log::info("overall success after {} attempts", attempt_count);
+        log::info("[Gateway] 业务请求最终完成，共尝试 {} 次。", attempt_count);
     else
-        log::error("overall failure: {}", result.error());
+        log::error("[Gateway] 全部重试耗尽: {}", result.error());
 }
 
-// --- 演示 3：operation_canceled 不重试 ---
-
-auto demo_fatal() -> async::Task<>
+auto demo_fatal_circuit_break() -> async::Task<>
 {
-    log::info("\n=== demo 3: non-retriable (operation_canceled) ===");
+    log::info("\n=== Demo 2: 致命错误立刻熔断 ===");
 
-    std::size_t retry_count = 0;
-    std::stop_source stop_src;
-    stop_src.request_stop();   // 立即取消
-
-    auto op = [&]() -> async::Task<std::expected<void, std::error_code>>
-    {
-        retry_count++;
-        auto result = co_await async::stop_then(
-            async::sleep_for(100ms), stop_src.get_token());
-        co_return result ? std::expected<void, std::error_code>{}
-                         : std::unexpected(result.error());
+    auto auth_fail_call = []() -> async::Task<std::expected<void, std::error_code>> {
+        co_await async::sleep_for(10ms);
+        co_return std::unexpected(std::make_error_code(std::errc::permission_denied));
     };
 
-    co_await retry_with_backoff(op, 5, 10ms);
+    auto result = co_await with_exponential_backoff(auth_fail_call, 3);
 
-    log::info("total attempts: {} (expected 1 — no retry on operation_canceled)",
-        retry_count);
+    if (!result)
+        log::info("[Gateway] 熔断机制生效（{}），快速向前端返回 HTTP 403。", result.error());
+}
+
+auto demo_graceful_cancellation() -> async::Task<>
+{
+    log::info("\n=== Demo 3: 纯异步协作式取消 ===");
+
+    std::stop_source stop_src;
+
+    async::co_spawn([](std::stop_source src) -> async::Task<> {
+        co_await async::sleep_for(100ms);
+        log::warning("[UI] 用户点击了取消按钮，触发 StopToken！");
+        src.request_stop();                                              // <-- 触发取消信号
+    }(stop_src));
+
+    log::info("[Downloader] 开始下载大文件（预计需要很久）...");
+
+    auto result = co_await async::stop_then(
+        async::sleep_for(10s),
+        stop_src.get_token()
+    );
+
+    if (!result) {
+        if (result.error() == std::errc::operation_canceled)
+            log::info("[Downloader] 收到取消信号，安全清理临时文件碎片。");
+        else
+            log::error("[Downloader] 发生 I/O 错误: {}", result.error());
+    }
 }
 
 } // namespace
 
 int main()
 {
-    async::run(demo_contrast);
-    async::run(demo_retry);
-    async::run(demo_fatal);
+    async::run(demo_rpc_retry);
+    async::run(demo_fatal_circuit_break);
+    async::run(demo_graceful_cancellation);
     return EXIT_SUCCESS;
 }
 ```
-
----
-
-## 运行方式
 
 ```bash
 ./build/tutorial/11_error_handling/tutorial.11_error_handling
 ```
 
-```
-[info] === demo 1: stop_then vs timeout ===
+```text
+[2026-05-07 17:28:21.610] [139636] [info] === Demo 1: 微服务 RPC 指数退避重试 ===
+[2026-05-07 17:28:21.620] [139636] [warning] [Retry] 瞬态错误: Connection refused。等待 50ms 后进行第 2 次重试...
+[2026-05-07 17:28:21.681] [139636] [warning] [Retry] 瞬态错误: Connection refused。等待 100ms 后进行第 3 次重试...
+[2026-05-07 17:28:21.791] [139636] [info] [Retry] 第 3 次尝试成功！
+[2026-05-07 17:28:21.791] [139636] [info] [Gateway] 业务请求最终完成，共尝试 3 次。
 
-[info] case A: operation_canceled (stop_then)
-[info] canceled externally at 200ms (as expected)
+[2026-05-07 17:28:21.791] [139636] [info] === Demo 2: 致命错误立刻熔断 ===
+[2026-05-07 17:28:21.801] [139636] [error] [Retry] 致命错误: Permission denied，立刻熔断。
+[2026-05-07 17:28:21.801] [139636] [info] [Gateway] 熔断机制生效（Permission denied），快速向前端返回 HTTP 403。
 
-[info] case B: timed_out (timeout)
-[info] timed out at 1s (as expected)
-
-[info] === demo 2: retry strategy ===
-[warning] attempt 1: error Connection refused (retriable)
-[info] retrying after 50ms
-[warning] attempt 2: error Connection refused (retriable)
-[info] retrying after 100ms
-[info] attempt 3: success
-[info] overall success after 3 attempts
-
-[info] === demo 3: non-retriable (operation_canceled) ===
-[warning] attempt 1: error Operation canceled (fatal)
-[info] total attempts: 1 (expected 1 — no retry on operation_canceled)
+[2026-05-07 17:28:21.801] [139636] [info] === Demo 3: 纯异步协作式取消 ===
+[2026-05-07 17:28:21.801] [139636] [info] [Downloader] 开始下载大文件（预计需要很久）...
+[2026-05-07 17:28:21.901] [139636] [warning] [UI] 用户点击了取消按钮，触发 StopToken！
+[2026-05-07 17:28:21.901] [139636] [info] [Downloader] 收到取消信号，安全清理临时文件碎片。
 ```
 
 ---
 
-## 两种机制的语义边界
+## 逐步解析
 
-| 方面 | `stop_then` | `timeout` |
-|------|------------|-----------|
-| **触发者** | 外部（调用者创建 stop_source） | 内部（自动计时） |
-| **触发时机** | 任意时刻（由调用者控制） | 精确的时间截止 |
-| **错误码** | `operation_canceled` | `timed_out` |
-| **可重试** | ❌ 否（主动取消，重试违反语义） | ✓ 视情况 |
-| **典型场景** | 用户 Ctrl-C、应用级关闭 | 单个操作截止、idle timeout |
+### 错误分类矩阵
 
-### 为什么错误码不同？
+所有重试决策都发生在这一个判断分支里：
 
-区分两种错误码是**设计上有意为之**的：
+```cpp
+bool is_transient = (
+    last_ec == std::errc::connection_refused ||
+    last_ec == std::errc::timed_out          ||
+    last_ec == std::errc::network_unreachable
+);
 
-- `operation_canceled` 表示调用者"决定停止"——再重试完全没有意义，会与调用者意图相悖。
-- `timed_out` 表示"时间不够"——对端可能只是暂时繁忙，下次可能成功，因此可以重试。
+if (!is_transient)
+    co_return std::unexpected(last_ec);   // <-- 致命错误：不进入退避
+```
 
----
-
-## Error Taxonomy：三类错误
-
-对整个系统的错误分类，决定不同的处理策略：
-
-| 类别 | 错误码示例 | 语义 | 策略 |
-|------|-----------|------|------|
-| **协作取消** | `operation_canceled` | 系统或调用者主动终止 | 立即返回，不重试，向上传播 |
-| **超时中断** | `timed_out` | 操作超过截止时间 | 可重试（有限次数 + 退避） |
-| **网络故障** | `connection_refused`, `connection_reset` | 对端或网络出现问题 | 可重试（取决于协议语义） |
-| **协议错误** | `bad_message`, 应用自定义 | 数据本身有问题 | 不重试，报告错误 |
+| 错误类型 | 典型错误码 | 处理策略 |
+|---------|-----------|--------|
+| **瞬态**（可重试） | `connection_refused`、`timed_out`、`network_unreachable` | 指数退避后重试 |
+| **致命**（不可恢复） | `permission_denied`、`operation_canceled` | 立刻 `co_return` 熔断 |
 
 ```mermaid
 flowchart TD
-    E[收到 error_code] --> A{是 operation_canceled?}
-    A -- 是 --> Z[立即返回，向上传播]
-    A -- 否 --> B{是 timed_out 或网络故障?}
-    B -- 否 --> Y[不重试，报告错误]
-    B -- 是 --> C{重试次数 < max_retries?}
-    C -- 否 --> Y
-    C -- 是 --> D[等待退避延迟]
+    E[操作返回 error_code] --> A{是 operation_canceled?}
+    A -- 是 --> Z[立即返回错误<br/>不可恢复]
+    A -- 否 --> B{是瞬态错误?<br/>connection_refused/timed_out/<br/>network_unreachable}
+    B -- 否 --> Y[是致命错误<br/>立即熔断]
+    B -- 是 --> C{重试计数<br/>< max_retries?}
+    C -- 否 --> F[已达最大重试次数<br/>返回最后的错误]
+    C -- 是 --> D[等待退避延迟<br/>delay *= 2]
     D --> E2[重新发起操作]
     E2 --> E
 ```
 
----
-
-## 重试退避（Retry with Backoff）
+### `template<typename Action>` — 零开销抽象
 
 ```cpp
-auto retry_with_backoff(auto op, std::size_t max_retries, auto initial_delay)
-    -> async::Task<std::expected<void, std::error_code>>
-{
-    auto delay = initial_delay;
-    for (std::size_t i = 0; i <= max_retries; ++i) {
-        auto result = co_await op();
-        if (result) co_return {};
-
-        bool retriable = (
-            result.error() == std::errc::connection_refused ||
-            result.error() == std::errc::timed_out
-        );
-
-        if (!retriable || i == max_retries)
-            co_return std::unexpected(result.error());
-
-        co_await async::sleep_for(delay);
-        delay *= 2;   // 指数退避
-    }
-}
+template<typename Action>
+auto with_exponential_backoff(Action&& action, ...) -> async::Task<...>
 ```
 
-关键点：
-1. **先检查错误类型**：`operation_canceled` 不进入重试，直接返回。
-2. **指数退避**：延迟倍增（100ms → 200ms → 400ms），避免频繁轰炸故障节点。
-3. **有限次数**：防止无限循环——永远不要无条件重试。
+接受模板参数 `Action` 而非 `std::function<...>`。编译器在每个调用点对 lambda 完全内联，无类型擦除、无虚函数调用、无额外堆分配。
 
----
+### 场景 1：瞬态重试路径
 
-## 组合技巧：带超时的重试
+`flaky_rpc_call` 前两次返回 `connection_refused`（瞬态），第三次返回成功。`with_exponential_backoff` 等待 50ms 后重试，再等待 100ms 后再试，第三次成功后立即返回，不消耗剩余的 `max_retries` 配额。
 
-将两种机制结合——每次尝试受超时限制，且整体可被外部取消：
+### 场景 2：致命错误立刻熔断
+
+`permission_denied` 不在 `is_transient` 集合中。第一次调用后 `with_exponential_backoff` 立刻 `co_return`，整个函数耗时仅约 10ms（一次模拟网络延迟），不进入退避等待。
+
+### 场景 3：伴随协程触发取消
 
 ```cpp
-auto resilient_op(std::stop_token cancel) -> async::Task<std::expected<void, std::error_code>>
-{
-    for (int attempt = 0; attempt < 3; ++attempt) {
-        // 每次尝试：最多等 2 秒
-        auto result = co_await async::timeout(
-            async::stop_then(do_request(), cancel),
-            2s
-        );
-
-        if (result) co_return {};
-
-        if (result.error() == std::errc::operation_canceled)
-            co_return std::unexpected(result.error());  // 外部取消，立即退出
-
-        // timed_out 或其他错误：退避重试
-        co_await async::sleep_for(100ms * (1 << attempt));
-    }
-
-    co_return std::unexpected(std::make_error_code(std::errc::timed_out));
-}
+async::co_spawn([](std::stop_source src) -> async::Task<> {  // <-- 伴随协程
+    co_await async::sleep_for(100ms);
+    src.request_stop();
+}(stop_src));
 ```
+
+`stop_source` 按值复制进协程帧——帧拥有数据，不存在悬空引用。`co_spawn` 方案不分配 OS 线程栈，延迟由 io_uring 定时器驱动，与 `std::jthread + sleep_for` 相比在单 IOContext 下无额外调度开销。
+
+> **Note**：`std::stop_source::request_stop()` 是线程安全的，可从任意线程调用。在单 IOContext 模型中伴随协程与主协程在同一线程，但代码不应依赖此实现细节。
 
 ---
 
 ## 本章小结
 
-- **错误码是语义的**：`operation_canceled` 表示主动决定，`timed_out` 表示时间耗尽，两者不可混淆。
-- **可重试性由错误类型决定**：协作取消不重试；超时和网络故障可重试，但需有限次数 + 指数退避。
-- **两种机制可以嵌套**：`timeout(stop_then(op, token), duration)` 组合使用，覆盖"主动取消"和"时间到期"两种中断场景。
+- **类型系统驱动策略**：错误码的分类决定了 `is_transient`，`is_transient` 的值决定了重试还是熔断，无需逐一枚举每个错误码。
+- `template<typename Action>` 消除了 `std::function` 的开销，编译器对 lambda 完全内联。
+- 取消触发通过 `co_spawn` 实现，不引入 OS 线程，符合 TPC 架构的线程纯洁性。
 
-下一节：[4.1 显式状态聚合（when_all）](08_when_all.md) — `when_all` 并发执行多个操作，返回 `tuple<expected...>`，等所有操作完成后合并结果。
-
+> **下一节**：[4.1 显式状态聚合：when_all](08_when_all.md) — 并发提交多个 I/O 操作，全部完成后统一收敛结果。

@@ -1,6 +1,8 @@
 # 1.4 并发调度与生命周期
 
 > **前置知识**：本章假设你已读完 1.1–1.3 节，理解 `Task<>`、`co_await` 与 `std::expected`。
+> **源文件**：[tutorial/04_co_spawn/main.cpp](../../tutorial/04_co_spawn/main.cpp)
+> **下一节**：[2.1 TCP 客户端：连接、发送与接收](02_tcp_client.md)
 
 ---
 

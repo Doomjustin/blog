@@ -33,11 +33,19 @@
 - [4.1 显式状态聚合：when_all](08_when_all.md) — `when_all`、并发操作、`tuple<expected...>` 结果合并
 - [4.2 竞速与抢占：when_any](09_when_any.md) — `when_any`、多副本冗余查询、取最快响应
 - [4.3 任务树的协作取消：any](10_any.md) — `all`、`any`、任务级并发与取消信号传播
+- [4.4 跨任务通信：Channel](11_channel.md) — `Channel<T>`、`ChannelPipe<T>`、owner-thread 与 backpressure
 
 ## 第 5 部分：零开销抽象与性能边界
 
-（即将到来）
+- [5.1 消除系统调用：Scatter/Gather I/O](12_scatter_gather.md)
+- [5.2 消除 CPU 拷贝：Zero-copy 发送](13_zero_copy.md)
+- [5.3 环形缓冲区调优：buffer_ring 容量规划与内存布局](14_buffer_ring.md)
 
 ## 第 6 部分：生产级架构管控
 
-（即将到来）
+- [6.1 信号与事件循环集成：优雅停机与系统生命周期](15_signals.md)
+- [6.2 线程模型与局部性：多线程部署策略](16_threading.md)
+
+## 附录
+
+- [附录：跨线程通信基准测试——ChannelPipe vs std::mutex](17_benchmark.md)

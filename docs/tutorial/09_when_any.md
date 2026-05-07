@@ -1,27 +1,52 @@
-# 4.2 竞速与抢占：`when_any`
+# 4.2 竞速与抢占：when_any
 
 > **前置知识**：本章假设你已读完 [4.1（when_all）](08_when_all.md)。
+> **源文件**：[tutorial/13_when_any/main.cpp](../../tutorial/13_when_any/main.cpp)
+> **下一节**：[4.3 任务树协作取消：all/any](10_any.md)
 
 ---
 
-## 换个问题：不需要所有人完成
+`when_any` 并发发起多个操作，**首个完成即返回，其余自动取消**。这一特性天然契合三类模式：冗余请求、SLA 保护、全局熔断。
 
-上一节的 `when_all` 等待"所有操作都完成"。有时我们只需要**最快的那个**——把同一个请求发给多个 endpoint，取先响应的，其余的丢弃。
+---
 
-`when_any` 正好对应这个场景：
+## 场景 1：Hedged Requests（冗余请求）
 
-```cpp
-auto result = co_await async::when_any(op0, op1, op2);
+目标：对两个副本并发请求，谁先返回用谁。
+
+```mermaid
+sequenceDiagram
+    participant G as Gateway
+    participant A as Replica-A
+    participant B as Replica-B
+
+    G->>A: Query (slow)
+    G->>B: Query (fast)
+    B-->>G: Winner
+    G-->>A: Cancel loser
 ```
 
-- 所有操作**同时**提交给 io_uring
-- 第一个返回 CQE 的操作"胜出"
-- 立即取消其余未完成的操作
-- 返回胜者的结果：同构时为 `expected<R, error_code>`，异构时为 `variant<expected<R0,E>, expected<R1,E>, ...>`（见后文）
+---
+
+## 场景 2：SLA 抢占（主链路 vs 保护线）
+
+目标：主链路请求还在跑时，同时挂一个 SLA 保护线；保护线先触发就立刻降级。
+
+这本质是控制平面抢占数据平面，避免慢请求拖垮尾延迟。
+
+---
+
+## 场景 3：Deadline Poison Pill（全局熔断）
+
+目标：长轮询可能挂很久，用全局 deadline 作为毒丸信号，超时就立即打断。
+
+这个模式常用于统一熔断、优雅收敛和慢链路隔离。
 
 ---
 
 ## 完整代码
+
+对应文件：[tutorial/13_when_any/main.cpp](../../tutorial/13_when_any/main.cpp)
 
 ```cpp
 #include <chrono>
@@ -29,95 +54,72 @@ auto result = co_await async::when_any(op0, op1, op2);
 
 #include <blog.h>
 
-namespace {
-
 using namespace std::chrono_literals;
 
-/// 演示 1：两个 endpoint 竞速，取先返回的
-///
-/// when_any 并发提交所有操作，第一个完成的"胜出"：
-///   - 返回胜者的结果（std::expected<void, error_code>）
-///   - 自动取消其余未完成的操作
-auto demo_any_endpoints() -> async::Task<>
+namespace {
+
+
+auto demo_hedged_requests() -> async::Task<>
 {
-    log::info("=== demo 1: compare two endpoints ===");
+    log::info("=== Demo 1: 高可用冗余请求 (Hedged Requests) ===");
     auto start = std::chrono::steady_clock::now();
 
-    // 模拟两个 endpoint：A 慢（300ms），B 快（100ms）
-    // when_any 取先完成的，另一个被自动取消
-    auto result = co_await async::when_any(
-        async::sleep_for(300ms),  // endpoint A
-        async::sleep_for(100ms)   // endpoint B（winner）
+    auto result = co_await async::when_any(    // <-- 首个完成即胜出
+        async::sleep_for(150ms),
+        async::sleep_for(50ms)
     );
 
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - start);
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start).count();
 
-    if (result)
-        log::info("winner responded in {}ms (expected ~100ms)", elapsed.count());
-    else
-        log::error("both failed: {}", result.error());
+    if (result) {
+        log::info("[Gateway] 冗余请求胜利！仅耗时 {}ms 拿到了数据。(慢节点已被自动 Cancel)", ms);
+    } else {
+        log::error("[Gateway] 所有副本全部请求失败: {}", result.error());
+    }
 }
 
-/// 演示 2：三方竞速，取最快的
-///
-/// 三个 sleep 的 resume_type 均为 void（同构路径），
-/// when_any 返回 expected<void, error_code>，直接检查。
-auto demo_any_three() -> async::Task<>
+auto demo_heterogeneous_multiplexing() -> async::Task<>
 {
-    log::info("\n=== demo 2: compare three endpoints ===");
-    auto start = std::chrono::steady_clock::now();
+    log::info("\n=== Demo 2: SLA 抢占竞速 (Primary I/O vs SLA Guard) ===");
+    log::info("[Gateway] 主链路请求进行中，同时启用 SLA 保护线...");
 
-    // 三个"请求"，速度不同
     auto result = co_await async::when_any(
-        async::sleep_for(500ms),   // 慢
-        async::sleep_for(100ms),   // 最快（winner）
-        async::sleep_for(300ms)    // 中等
+        async::sleep_for(500ms),
+        async::timeout(async::sleep_for(5s), 80ms)  // <-- SLA 保护线
     );
 
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - start);
-
-    if (result)
-        log::info("fastest responded in {}ms (expected ~100ms)", elapsed.count());
-    else
-        log::error("error: {}", result.error());
+    if (result) {
+        log::info("[Gateway] 主链路在 SLA 内返回，继续主路径处理。");
+    } else {
+        log::warning("[Gateway] SLA 保护线触发（{}），主链路被取消并执行降级。", result.error());
+    }
 }
 
-/// 演示 3：胜者失败时的行为
-///
-/// 如果最先返回的操作失败，when_any 照样返回该失败结果，
-/// 并取消其余操作。调用者通过检查 expected 来判断是否需要回退。
-auto demo_winner_fails() -> async::Task<>
+auto demo_poison_pill() -> async::Task<>
 {
-    log::info("\n=== demo 3: first to complete fails ===");
-    auto start = std::chrono::steady_clock::now();
+    log::info("\n=== Demo 3: Deadline Poison Pill (全局熔断) ===");
+    log::info("[Client] 客户端发起长轮询，请求可能挂起很久...");
 
-    // endpoint A：200ms 后超时失败
-    // endpoint B：500ms 后正常完成
-    // A 先完成（以失败告终），when_any 返回 A 的失败结果并取消 B
     auto result = co_await async::when_any(
-        async::timeout(async::sleep_for(5s), 200ms),  // A: 先完成，但超时失败
-        async::sleep_for(500ms)                        // B: 慢，被取消
+        async::sleep_for(10s),
+        async::timeout(async::sleep_for(5s), 100ms)  // <-- 全局 deadline 毒丸
     );
 
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - start);
-
-    if (!result)
-        log::info("first to finish failed with {} at {}ms (expected ~200ms, timed_out)",
-            result.error(), elapsed.count());
-    else
-        log::info("unexpected success");
+    if (!result) {
+        log::info("[Client] 收到熔断信号（{}），长轮询已被瞬间打断。", result.error());
+    } else {
+        log::info("[Client] 长轮询正常结束。");
+    }
 }
 
 } // namespace
 
 int main()
 {
-    async::run(demo_any_endpoints);
-    async::run(demo_any_three);
-    async::run(demo_winner_fails);
+    async::run(demo_hedged_requests);
+    async::run(demo_heterogeneous_multiplexing);
+    async::run(demo_poison_pill);
     return EXIT_SUCCESS;
 }
 ```
@@ -130,155 +132,62 @@ int main()
 ./build/tutorial/13_when_any/tutorial.13_when_any
 ```
 
-```
-[info] === demo 1: compare two endpoints ===
-[info] winner responded in 100ms (expected ~100ms)
+实际输出：
 
-[info] === demo 2: compare three endpoints ===
-[info] fastest responded in 100ms (expected ~100ms)
+```text
+[2026-05-07 17:07:14.155] [133108] [info] === Demo 1: 高可用冗余请求 (Hedged Requests) ===
+[2026-05-07 17:07:14.205] [133108] [info] [Gateway] 冗余请求胜利！仅耗时 50ms 拿到了数据。(慢节点已被自动 Cancel)
 
-[info] === demo 3: first to complete fails ===
-[info] first to finish failed with Connection timed out at 200ms (expected ~200ms, timed_out)
+[2026-05-07 17:07:14.206] [133108] [info] === Demo 2: SLA 抢占竞速 (Primary I/O vs SLA Guard) ===
+[2026-05-07 17:07:14.206] [133108] [info] [Gateway] 主链路请求进行中，同时启用 SLA 保护线...
+[2026-05-07 17:07:14.286] [133108] [warning] [Gateway] SLA 保护线触发（Connection timed out），主链路被取消并执行降级。
+
+[2026-05-07 17:07:14.286] [133108] [info] === Demo 3: Deadline Poison Pill (全局熔断) ===
+[2026-05-07 17:07:14.286] [133108] [info] [Client] 客户端发起长轮询，请求可能挂起很久...
+[2026-05-07 17:07:14.386] [133108] [info] [Client] 收到熔断信号（Connection timed out），长轮询已被瞬间打断。
 ```
 
 ---
 
-## 语义分析
+## 逐步解析
 
-### `when_any` vs `when_all` 的核心区别
+### 场景 1：Hedged Requests（冗余请求）
 
-| 维度 | `when_all` | `when_any` |
-|------|-----------|-----------|
-| **等待策略** | 所有操作完成 | 第一个完成 |
-| **返回类型** | `tuple<expected<R0,E>, expected<R1,E>, ...>` | `expected<R, E>`（胜者的结果） |
-| **未完成操作** | 不存在（都等完了） | 自动取消 |
-| **总耗时** | 最慢的那个 | 最快的那个 |
-| **典型场景** | 批量请求全部完成后合并 | 多副本冗余查询，取首个响应 |
-
-### 时间线对比
-
-```
-when_all（3个操作）：
-t=0ms    A(300), B(100), C(200)  开始
-t=100ms  B完成
-t=200ms  C完成
-t=300ms  A完成 ← 此时返回（耗时 300ms）
-
-when_any（3个操作）：
-t=0ms    A(500), B(100), C(300)  开始
-t=100ms  B完成 ← 此时返回（耗时 100ms），A和C被取消
-```
+对两个副本并发请求，谁先返回用谁，另一个自动取消。
 
 ```mermaid
 sequenceDiagram
-    participant C as 协程
-    participant W as when_any
-    participant R as io_uring
+    participant G as Gateway
+    participant A as Replica-A
+    participant B as Replica-B
 
-    C->>W: co_await when_any(A(500ms), B(100ms), C(300ms))
-    W->>R: 提交 SQE-A
-    W->>R: 提交 SQE-B
-    W->>R: 提交 SQE-C
-    W-->>C: 挂起协程
-
-    R-->>W: CQE-B（100ms，胜者）
-    W->>R: 提交 cancel SQE-A
-    W->>R: 提交 cancel SQE-C
-    R-->>W: CQE-A（operation_canceled）
-    R-->>W: CQE-C（operation_canceled）
-    W-->>C: 恢复，返回 B 的结果
+    G->>A: Query (slow)
+    G->>B: Query (fast)
+    B-->>G: Winner
+    G-->>A: Cancel loser
 ```
 
-### 同构路径 vs 异构路径
+### 场景 2：SLA 抢占（主链路 vs 保护线）
 
-`when_any` 的返回类型由参数决定：
+主链路请求还在跑时，同时挂一个 SLA 保护线——保护线先触发就立刻降级。这本质是控制平面抢占数据平面，避免慢请求拖垃尾延迟。
 
-| 所有参数 `resume_type` | 返回类型 | 访问方式 |
-|----------------------|----------|---------|
-| **相同**（同构）| `expected<R, error_code>` | 直接用，无需解构 |
-| **不同**（异构）| `variant<expected<R0, E>, expected<R1, E>, ...>` | `.index()` 判断胜者，`std::get<I>` 取值 |
+### 场景 3：Deadline Poison Pill（全局熔断）
 
-**同构示例**（本章 demo 1、2、3 均属此类，resume_type 都是 `void`）：
+长轮询可能挂很久，用全局 deadline 作为毒丸信号，超时就立即打断。常用于统一熔断、优雅收敛和慢链路隔离。
 
-```cpp
-// 两个 sleep：resume_type 均为 void → 同构 → expected<void>
-auto result = co_await async::when_any(
-    async::sleep_for(300ms),
-    async::sleep_for(100ms)
-);
-if (result)
-    log::info("winner done");  // 直接检查 expected<void>
-```
+### `when_any` 的返回值类型
 
-**异构示例**（参数返回类型不同）：
+- 所有操作返回类型相同：直接返回 `expected<R, E>`。
+- 返回类型不同：返回 `variant<expected<R1,E>, expected<R2,E>, ...>`，可通过 `index()` 判断胜出分支。
 
-```cpp
-// ch.receive() resume_type = int
-// sleep_for    resume_type = void
-// → 异构 → variant<expected<int, E>, expected<void, E>>
-auto result = co_await async::when_any(
-    ch.receive(),
-    async::sleep_for(1s)
-);
-
-if (result.index() == 0) {
-    // channel 先完成
-    auto& val = std::get<0>(result);
-    if (val) log::info("received: {}", *val);
-} else {
-    // sleep 先完成（超时）
-    log::warning("no message within 1s");
-}
-```
-
-`timeout(ch.receive(), 1s)` 是上面异构 `when_any` 的等价封装，推荐直接使用 `timeout` 而非手写 `when_any`。
-
-```cpp
-// when_all：解构 tuple
-auto [r0, r1] = co_await async::when_all(op0, op1);
-
-// when_any（同构）：直接使用 expected
-auto result = co_await async::when_any(op0, op1);
-if (result) { ... }
-
-// when_any（异构）：按 index 分发
-auto result = co_await async::when_any(op0, op1);
-if (result.index() == 0) { ... }
-```
-
-### 胜者失败不等于整体失败
-
-demo 3 展示了一个重要语义：**胜者可以是"以失败告终的最快者"**。
-
-```
-A（timeout 200ms）先完成 → 以 timed_out 失败
-B（500ms）更慢 → 被取消，永远没有机会完成
-```
-
-`when_any` 不区分"成功完成"和"失败完成"——谁先有结果谁就胜出，无论结果是成功还是失败。如果需要"取第一个成功的"，需要在外层加重试逻辑。
-
----
-
-## `when_any` 与 `any` 的区别
-
-`when_any` 和 `any` 都是"取最快的"，但针对不同层次的操作：
-
-| | `when_any` | `any` |
-|--|-----------|-------|
-| **操作类型** | `cancelable_operation`（I/O 操作） | `Task<>`（协程任务） |
-| **取消机制** | 通过 io_uring 链接 SQE 取消 | 通过 `stop_token` 协作取消 |
-| **适用场景** | `sleep_for`、`recv`、`send` 等 | 任意协程逻辑 |
-
-`any` 在 4.3 节详细介绍。
+> **Note**：loser 的取消直接下发 `CANCEL SQE` 进入 io_uring，无额外线程或锁。
 
 ---
 
 ## 本章小结
 
-- **`when_any` 取最快的**：所有操作并发提交，第一个返回的胜出，其余自动取消。
-- **同构路径**：所有参数 `resume_type` 相同时，返回 `expected<R, E>`，直接检查。
-- **异构路径**：参数 `resume_type` 不同时，返回 `variant<expected<R0, E>, expected<R1, E>, ...>`，用 `.index()` 识别胜者。
-- **胜者失败也算胜**：无论成功还是失败，第一个有结果的就返回。
-- **总耗时 = 最快的那个**：与 `when_all` 的"最慢的那个"相对。
+- `when_any` 的核心价值是"竞速 + 取消"：首个完成即胜出，其余立即被 Cancel。
+- 三种工业场景——冗余请求、SLA 抢占、全局熔断——都是同一原语的不同应用。
+- 运行时开销极低：取消动作直接下发 `CANCEL SQE`，不引入额外线程或锁。
 
-下一节：[4.3 任务树的协作取消（any）](10_any.md) — `any` 组合器，子任务失败时如何通过信号链安全销毁同级协程帧。
+> **下一节**：[4.3 任务树协作取消：all/any](10_any.md)
