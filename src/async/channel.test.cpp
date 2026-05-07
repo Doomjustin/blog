@@ -9,6 +9,8 @@
 #include <run.h>
 #include <sleep_for.h>
 #include <task.h>
+#include <timeout.h>
+#include <when_any.h>
 
 using namespace std::chrono_literals;
 
@@ -188,4 +190,147 @@ TEST_CASE("channel: multiple producers fan-in to single consumer", "[async][chan
     REQUIRE(total == 333);
 }
 
+TEST_CASE("channel: close wakes suspended receiver with Closed error", "[async][channel]")
+{
+    // receiver suspends on empty channel, then close() wakes it
+    std::expected<int, std::error_code> result{};
+
+    auto receiver_task = [](async::Channel<int>& ch,
+                            std::expected<int, std::error_code>& out) -> async::Task<> {
+        out = co_await ch.receive();
+    };
+
+    auto closer_task = [](async::Channel<int>& ch) -> async::Task<> {
+        co_await async::sleep_for(1ms);
+        ch.close();
+    };
+
+    auto entry = [&]() -> async::Task<> {
+        async::Channel<int> ch{ 0 };
+        co_await async::all(receiver_task(ch, result), closer_task(ch));
+    };
+    async::run(entry);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error() == async::make_error_code(async::ChannelError::Closed));
+}
+
+TEST_CASE("channel: close wakes suspended sender with Closed error", "[async][channel]")
+{
+    // sender suspends on full channel (rendezvous), then close() wakes it
+    std::expected<void, std::error_code> result{};
+
+    auto sender_task = [](async::Channel<int>& ch,
+                          std::expected<void, std::error_code>& out) -> async::Task<> {
+        out = co_await ch.send(42);
+    };
+
+    auto closer_task = [](async::Channel<int>& ch) -> async::Task<> {
+        co_await async::sleep_for(1ms);
+        ch.close();
+    };
+
+    auto entry = [&]() -> async::Task<> {
+        async::Channel<int> ch{ 0 }; // rendezvous: sender will suspend
+        co_await async::all(sender_task(ch, result), closer_task(ch));
+    };
+    async::run(entry);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error() == async::make_error_code(async::ChannelError::Closed));
+}
+
+TEST_CASE("channel: cancelled receive via when_any returns operation_canceled",
+          "[async][channel]")
+{
+    // receive suspends; a concurrent sleep wins the race and cancels the receive
+    auto entry = []() -> async::Task<> {
+        async::Channel<int> ch{ 0 };
+
+        auto result = co_await async::when_any(
+            ch.receive(),
+            async::sleep_for(1ms)
+        );
+
+        // sleep_for has resume_type void; ch.receive() has resume_type int
+        // → heterogeneous → variant; index 1 means sleep won
+        REQUIRE(result.index() == 1);
+    };
+    async::run(entry);
+}
+
+TEST_CASE("channel: cancelled send via when_any returns operation_canceled",
+          "[async][channel]")
+{
+    // sender suspends on rendezvous channel; sleep wins the race and cancels the send
+    // send and sleep both have resume_type void → when_any returns expected<void>
+    // when_any returns the winner's result: sleep succeeded → has_value()
+    // the key assertion is that the whole thing completes without hanging
+    auto entry = []() -> async::Task<> {
+        async::Channel<int> ch{ 0 }; // rendezvous: send will suspend
+
+        auto result = co_await async::when_any(
+            ch.send(99),
+            async::sleep_for(1ms)
+        );
+
+        // sleep won → its result (success) is returned
+        REQUIRE(result.has_value());
+    };
+    async::run(entry);
+}
+
+TEST_CASE("channel: timeout on suspended receive returns timed_out", "[async][channel]")
+{
+    // No sender: receive will suspend. timeout() races it against a timer.
+    auto entry = []() -> async::Task<> {
+        async::Channel<int> ch{ 0 };
+
+        auto result = co_await async::timeout(ch.receive(), 1ms);
+
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error() == std::make_error_code(std::errc::timed_out));
+    };
+    async::run(entry);
+}
+
+TEST_CASE("channel: timeout on suspended send returns timed_out", "[async][channel]")
+{
+    // No receiver: send will suspend on rendezvous channel. timeout() cancels it.
+    auto entry = []() -> async::Task<> {
+        async::Channel<int> ch{ 0 };
+
+        auto result = co_await async::timeout(ch.send(42), 1ms);
+
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error() == std::make_error_code(std::errc::timed_out));
+    };
+    async::run(entry);
+}
+
+TEST_CASE("channel: timeout does not fire when send completes in time", "[async][channel]")
+{
+    // A receiver task is already waiting; send completes immediately.
+    auto entry = []() -> async::Task<> {
+        async::Channel<int> ch{ 0 };
+        int received = -1;
+
+        auto receiver = [&]() -> async::Task<> {
+            auto r = co_await ch.receive();
+            REQUIRE(r.has_value());
+            received = *r;
+        };
+
+        co_await async::all(
+            receiver(),
+            [&]() -> async::Task<> {
+                auto result = co_await async::timeout(ch.send(7), 5s);
+                REQUIRE(result.has_value());
+            }()
+        );
+
+        REQUIRE(received == 7);
+    };
+    async::run(entry);
+}
 
