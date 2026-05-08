@@ -1,5 +1,5 @@
-#ifndef BLOG_FILE_SYSTEM_OPERATIONS_H
-#define BLOG_FILE_SYSTEM_OPERATIONS_H
+#ifndef BLOG_FILE_SYSTEM_TRANSFER_H
+#define BLOG_FILE_SYSTEM_TRANSFER_H
 
 #include <span>
 
@@ -20,7 +20,7 @@ namespace fs {
  * @param buffer Destination span; must remain valid until the coroutine resumes.
  */
 [[nodiscard]]
-inline auto read_all(StreamFile& file, std::span<std::byte> buffer) -> ReadAllAwaiter
+inline auto read(StreamFile& file, std::span<std::byte> buffer) -> ReadAllAwaiter
 {
     return { file.context(), file.native_handle(), buffer };
 }
@@ -35,11 +35,11 @@ inline auto read_all(StreamFile& file, std::span<std::byte> buffer) -> ReadAllAw
  * @param buffer Source span; must remain valid until the coroutine resumes.
  */
 [[nodiscard]]
-inline auto write_all(StreamFile& file, std::span<const std::byte> buffer) -> WriteAllAwaiter
+inline auto write(StreamFile& file, std::span<const std::byte> buffer) -> WriteAllAwaiter
 {
     return { file.context(), file.native_handle(), buffer };
 }
 
 } // namespace fs
 
-#endif // BLOG_FILE_SYSTEM_OPERATIONS_H
+#endif // BLOG_FILE_SYSTEM_TRANSFER_H

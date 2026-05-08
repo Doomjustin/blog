@@ -6,7 +6,9 @@
 
 #include <file_system/base_file.h>
 #include <file_system/read_at_awaiter.h>
+#include <file_system/read_awaiter.h>
 #include <file_system/write_at_awaiter.h>
+#include <file_system/write_awaiter.h>
 
 namespace fs {
 
@@ -23,6 +25,31 @@ public:
     using BaseFile::BaseFile;
 
     /**
+     * @brief Suspend until a read using the file's current position completes.
+     *
+     * @param buffer Writable span to receive the data.
+     * @return Awaiter yielding bytes read, or an error code on failure.
+     *         A result of 0 indicates EOF.
+     */
+    [[nodiscard]]
+    auto async_read(std::span<std::byte> buffer) -> ReadAwaiter
+    {
+        return { context(), native_handle(), buffer };
+    }
+
+    /**
+     * @brief Suspend until a write using the file's current position completes.
+     *
+     * @param buffer Read-only span of data to write.
+     * @return Awaiter yielding bytes written, or an error code on failure.
+     */
+    [[nodiscard]]
+    auto async_write(std::span<const std::byte> buffer) -> WriteAwaiter
+    {
+        return { context(), native_handle(), buffer };
+    }
+
+    /**
      * @brief Suspend until a read at the given byte offset completes.
      *
      * @param offset Byte offset from the start of the file.
@@ -31,7 +58,7 @@ public:
      *         A result of 0 indicates EOF at `offset`.
      */
     [[nodiscard]]
-    auto async_read_at(std::uint64_t offset, std::span<std::byte> buffer) -> ReadAtAwaiter
+    auto async_read(std::uint64_t offset, std::span<std::byte> buffer) -> ReadAtAwaiter
     {
         return { context(), native_handle(), offset, buffer };
     }
@@ -44,7 +71,7 @@ public:
      * @return Awaiter yielding bytes written, or an error code on failure.
      */
     [[nodiscard]]
-    auto async_write_at(std::uint64_t offset, std::span<const std::byte> buffer) -> WriteAtAwaiter
+    auto async_write(std::uint64_t offset, std::span<const std::byte> buffer) -> WriteAtAwaiter
     {
         return { context(), native_handle(), offset, buffer };
     }
