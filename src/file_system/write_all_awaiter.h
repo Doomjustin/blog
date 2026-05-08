@@ -29,8 +29,8 @@ public:
      * @pre `buffer` must remain valid until the coroutine resumes.
      */
     WriteAllAwaiter(async::IOContext& context, int fd, std::span<const std::byte> buffer)
-      : async::LoopOperation<WriteAllAwaiter, std::span<const std::byte>>{ context, buffer }
-      , fd_{ fd }
+      : async::LoopOperation<WriteAllAwaiter, std::span<const std::byte>>{ context, buffer }, 
+        fd_{ fd }
     {}
 
     auto arm() noexcept -> bool
