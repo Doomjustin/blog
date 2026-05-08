@@ -2,7 +2,7 @@
 
 #include <unistd.h>
 
-#include <common/exceptions.h>
+#include <common/common.h>
 
 namespace fs {
 
