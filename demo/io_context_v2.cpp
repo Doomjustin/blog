@@ -8,6 +8,7 @@
 #include <spdlog/spdlog.h>
 
 #include "co_spawn.h"
+#include "exceptions.h"
 #include "operation.h"
 #include "signals.h"
 #include "sleep_for.h"

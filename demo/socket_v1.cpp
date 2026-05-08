@@ -9,7 +9,6 @@
 #include <spdlog/spdlog.h>
 
 #include "co_spawn.h"
-#include "exceptions.h"
 #include "io_context.h"
 #include "operation.h"
 #include "option.h"

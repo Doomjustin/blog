@@ -8,7 +8,7 @@ add_library(blog::demo ALIAS demo)
 
 target_compile_features(demo PUBLIC cxx_std_23)
 
-target_include_directories(demo PUBLIC ${CMAKE_CURRENT_LIST_DIR})
+target_include_directories(demo PUBLIC ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_SOURCE_DIR}/src)
 
 target_link_libraries(demo 
     PUBLIC 
