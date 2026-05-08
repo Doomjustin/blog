@@ -12,8 +12,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <io_context.h>
-#include <stop_then.h>
+#include <async/io_context.h>
+#include <async/stop_then.h>
 
 namespace {
 

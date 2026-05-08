@@ -9,9 +9,9 @@
 #include <utility>
 #include <vector>
 
-#include <io_context.h>
-#include <operation.h>
-#include <this_coroutine.h>
+#include <async/io_context.h>
+#include <async/operation.h>
+#include <async/this_coroutine.h>
 
 namespace async {
 

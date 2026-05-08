@@ -39,7 +39,10 @@ void throw_system_error(std::format_string<Args...> fmt, Args&&... args)
  *
  * @return `std::unexpected` holding the current `errno` system error.
  */
-auto unexpected_system_error() -> std::unexpected<std::error_code>;
+inline auto unexpected_system_error() -> std::unexpected<std::error_code>
+{
+    return std::unexpected{ std::error_code{ errno, std::system_category() } };
+}
 
 /**
  * @brief Wrap a specific `std::errc` as an `std::unexpected` error code.
@@ -47,7 +50,10 @@ auto unexpected_system_error() -> std::unexpected<std::error_code>;
  * @param ec Standard error condition to wrap.
  * @return `std::unexpected` holding the corresponding error code.
  */
-auto unexpected_system_error(std::errc ec) -> std::unexpected<std::error_code>;
+inline auto unexpected_system_error(std::errc ec) -> std::unexpected<std::error_code>
+{
+    return std::unexpected{ std::make_error_code(ec) };
+}
 
 /**
  * @brief Wrap an explicit POSIX error number as an `std::unexpected` error code.
@@ -55,6 +61,9 @@ auto unexpected_system_error(std::errc ec) -> std::unexpected<std::error_code>;
  * @param error Positive POSIX error number.
  * @return `std::unexpected` holding the error code.
  */
-auto unexpected_system_error(int error) -> std::unexpected<std::error_code>;
+inline auto unexpected_system_error(int error) -> std::unexpected<std::error_code>
+{
+    return std::unexpected{ std::error_code{ error, std::system_category() } };
+}
 
 #endif // BLOG_COMMON_EXCEPTIONS_H

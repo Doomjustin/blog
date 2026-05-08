@@ -1,10 +1,10 @@
 #ifndef BLOG_NET_TRANSFER_H
 #define BLOG_NET_TRANSFER_H
 
-#include <receive_all_awaiter.h>
-#include <send_all_awaiter.h>
-#include <send_all_zc_awaiter.h>
-#include <zero_copy.h>
+#include <net/receive_all_awaiter.h>
+#include <net/send_all_awaiter.h>
+#include <net/send_all_zc_awaiter.h>
+#include <net/zero_copy.h>
 
 namespace net {
 

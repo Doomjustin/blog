@@ -1,14 +1,14 @@
-#include <channel.h>
+#include <async/channel.h>
 
 #include <atomic>
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <all.h>
-#include <run.h>
-#include <sleep_for.h>
-#include <task.h>
+#include <async/all.h>
+#include <async/run.h>
+#include <async/sleep_for.h>
+#include <async/task.h>
 
 using namespace std::chrono_literals;
 using namespace async;

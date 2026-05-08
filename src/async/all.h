@@ -3,9 +3,9 @@
 
 #include <utility>
 
-#include <awaitable.h>
-#include <scope.h>
-#include <task.h>
+#include <async/awaitable.h>
+#include <async/scope.h>
+#include <async/task.h>
 
 namespace async {
 

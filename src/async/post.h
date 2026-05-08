@@ -1,8 +1,8 @@
 #ifndef BLOG_ASYNC_POST_H
 #define BLOG_ASYNC_POST_H
 
-#include <io_context.h>
-#include <operation.h>
+#include <async/io_context.h>
+#include <async/operation.h>
 
 namespace async {
 

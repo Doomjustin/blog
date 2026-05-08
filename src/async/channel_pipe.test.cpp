@@ -1,15 +1,15 @@
-#include <channel_pipe.h>
+#include <async/channel_pipe.h>
 
 #include <thread>
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <co_spawn.h>
-#include <run.h>
-#include <sleep_for.h>
-#include <task.h>
-#include <timeout.h>
+#include <async/co_spawn.h>
+#include <async/run.h>
+#include <async/sleep_for.h>
+#include <async/task.h>
+#include <async/timeout.h>
 
 using namespace std::chrono_literals;
 using namespace async;

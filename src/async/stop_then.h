@@ -9,9 +9,9 @@
 #include <stop_token>
 #include <system_error>
 
-#include <operation.h>
-#include <post.h>
-#include <single_operation.h>
+#include <async/operation.h>
+#include <async/post.h>
+#include <async/single_operation.h>
 
 namespace async {
 

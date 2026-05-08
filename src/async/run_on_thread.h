@@ -14,10 +14,10 @@
 #include <type_traits>
 #include <utility>
 
-#include <io_context.h>
-#include <operation.h>
-#include <post.h>
-#include <this_coroutine.h>
+#include <async/io_context.h>
+#include <async/operation.h>
+#include <async/post.h>
+#include <async/this_coroutine.h>
 
 namespace async {
 

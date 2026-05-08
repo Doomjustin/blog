@@ -5,9 +5,9 @@
 
 #include <liburing.h>
 
-#include <common.h>
-#include <operation.h>
-#include <this_coroutine.h>
+#include <async/operation.h>
+#include <async/this_coroutine.h>
+#include <common/common.h>
 
 namespace async {
 

@@ -3,9 +3,9 @@
 
 #include <sys/socket.h>
 
-#include <accept_awaiter.h>
-#include <async.h>
-#include <base_socket.h>
+#include <net/accept_awaiter.h>
+#include <async/async.h>
+#include <net/base_socket.h>
 
 namespace net {
 

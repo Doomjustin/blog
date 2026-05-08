@@ -8,7 +8,7 @@ add_library(blog_async ${BLOG_ASYNC_IMPLEMENT_SOURCE})
 add_library(blog::async ALIAS blog_async)
 
 target_compile_features(blog_async PUBLIC cxx_std_23)
-target_include_directories(blog_async PUBLIC ${CMAKE_CURRENT_LIST_DIR})
+target_include_directories(blog_async PUBLIC ${CMAKE_CURRENT_LIST_DIR}/..)
 target_link_libraries(blog_async
     PUBLIC
         blog::common

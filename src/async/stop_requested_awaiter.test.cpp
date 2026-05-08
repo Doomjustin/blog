@@ -1,4 +1,4 @@
-#include <stop_requested_awaiter.h>
+#include <async/stop_requested_awaiter.h>
 
 #include <atomic>
 #include <chrono>
@@ -10,7 +10,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <io_context.h>
+#include <async/io_context.h>
 
 namespace {
 

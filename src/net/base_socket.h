@@ -8,11 +8,11 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include <async.h>
-#include <common.h>
-#include <linger.h>
-#include <option.h>
-#include <query_endpoint.h>
+#include <async/async.h>
+#include <common/common.h>
+#include <net/linger.h>
+#include <net/option.h>
+#include <net/query_endpoint.h>
 
 namespace net {
 

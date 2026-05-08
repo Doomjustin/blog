@@ -10,8 +10,8 @@
 #include <liburing.h>
 #include <liburing/io_uring.h>
 
-#include <async.h>
-#include <pooled_buffer.h>
+#include <async/async.h>
+#include <net/pooled_buffer.h>
 
 namespace net {
 

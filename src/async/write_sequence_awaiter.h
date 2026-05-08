@@ -5,8 +5,8 @@
 
 #include <liburing.h>
 
-#include <buffer.h>
-#include <single_operation.h>
+#include <async/buffer.h>
+#include <async/single_operation.h>
 
 namespace async {
 

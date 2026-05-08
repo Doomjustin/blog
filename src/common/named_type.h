@@ -5,7 +5,7 @@
 #include <concepts>
 #include <cstddef>
 
-#include <fixed_string.h>
+#include <common/fixed_string.h>
 
 /**
  * @brief Strong typedef wrapper that prevents implicit unit confusion.

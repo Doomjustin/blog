@@ -5,9 +5,9 @@
 #include <cstdint>
 #include <utility>
 
-#include "mpsc_queue.h"
+#include <common/mpsc_queue.h>
 
-#include <common.h>
+#include <common/common.h>
 
 namespace async {
 

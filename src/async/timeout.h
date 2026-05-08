@@ -11,11 +11,11 @@
 
 #include <liburing.h>
 
-#include <common.h>
-#include <operation.h>
-#include <single_operation.h>
-#include <sleep_for.h>
-#include <when_any.h>
+#include <common/common.h>
+#include <async/operation.h>
+#include <async/single_operation.h>
+#include <async/sleep_for.h>
+#include <async/when_any.h>
 
 namespace async {
 

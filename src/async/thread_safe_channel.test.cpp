@@ -1,16 +1,16 @@
-#include <thread_safe_channel.h>
+#include <async/thread_safe_channel.h>
 
 #include <atomic>
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <all.h>
-#include <run.h>
-#include <sleep_for.h>
-#include <task.h>
-#include <timeout.h>
-#include <when_any.h>
+#include <async/all.h>
+#include <async/run.h>
+#include <async/sleep_for.h>
+#include <async/task.h>
+#include <async/timeout.h>
+#include <async/when_any.h>
 
 using namespace std::chrono_literals;
 

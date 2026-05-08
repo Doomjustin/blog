@@ -7,11 +7,11 @@
 #include <stop_token>
 #include <utility>
 
-#include <awaitable.h>
-#include <co_spawn.h>
-#include <stop_requested_awaiter.h>
-#include <task.h>
-#include <this_coroutine.h>
+#include <async/awaitable.h>
+#include <async/co_spawn.h>
+#include <async/stop_requested_awaiter.h>
+#include <async/task.h>
+#include <async/this_coroutine.h>
 
 namespace async {
 

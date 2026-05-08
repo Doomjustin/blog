@@ -1,4 +1,4 @@
-#include <scope.h>
+#include <async/scope.h>
 
 #include <atomic>
 #include <chrono>
@@ -6,9 +6,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <run.h>
-#include <sleep_for.h>
-#include <stop_requested_awaiter.h>
+#include <async/run.h>
+#include <async/sleep_for.h>
+#include <async/stop_requested_awaiter.h>
 
 using namespace std::chrono_literals;
 

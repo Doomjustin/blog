@@ -4,14 +4,14 @@
 #include <catch2/benchmark/catch_benchmark.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include <all.h>
-#include <channel.h>
-#include <channel_pipe.h>
-#include <co_spawn.h>
-#include <run.h>
-#include <sleep_for.h>
-#include <task.h>
-#include <thread_safe_channel.h>
+#include <async/all.h>
+#include <async/channel.h>
+#include <async/channel_pipe.h>
+#include <async/co_spawn.h>
+#include <async/run.h>
+#include <async/sleep_for.h>
+#include <async/task.h>
+#include <async/thread_safe_channel.h>
 
 using namespace async;
 using namespace std::chrono_literals;

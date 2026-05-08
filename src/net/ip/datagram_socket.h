@@ -4,17 +4,17 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 
-#include "write_sequence_awaiter.h"
+#include <async/write_sequence_awaiter.h>
 
-#include <async.h>
-#include <base_socket.h>
-#include <common.h>
-#include <operations.h>
-#include <query_endpoint.h>
-#include <receive_awaiter.h>
-#include <send_awaiter.h>
-#include <send_zc_awaiter.h>
-#include <zero_copy.h>
+#include <async/async.h>
+#include <net/base_socket.h>
+#include <common/common.h>
+#include <net/operations.h>
+#include <net/query_endpoint.h>
+#include <net/receive_awaiter.h>
+#include <net/send_awaiter.h>
+#include <net/send_zc_awaiter.h>
+#include <net/zero_copy.h>
 
 namespace net::ip {
 

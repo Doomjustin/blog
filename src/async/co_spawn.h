@@ -1,9 +1,9 @@
 #ifndef BLOG_ASYNC_CO_SPAWN_H
 #define BLOG_ASYNC_CO_SPAWN_H
 
-#include <awaitable.h>
-#include <detached_task.h>
-#include <shift_to.h>
+#include <async/awaitable.h>
+#include <async/detached_task.h>
+#include <async/shift_to.h>
 
 namespace async {
 

@@ -7,9 +7,9 @@
 
 #include <liburing.h>
 
-#include <common.h>
-#include <single_operation.h>
-#include <this_coroutine.h>
+#include <common/common.h>
+#include <async/single_operation.h>
+#include <async/this_coroutine.h>
 
 namespace async {
 

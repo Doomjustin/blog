@@ -10,10 +10,10 @@
 #include <utility>
 #include <vector>
 
-#include <io_context.h>
-#include <operation.h>
-#include <spinlock.h>
-#include <this_coroutine.h>
+#include <async/io_context.h>
+#include <async/operation.h>
+#include <common/spinlock.h>
+#include <async/this_coroutine.h>
 
 namespace async {
 

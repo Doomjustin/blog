@@ -3,11 +3,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <all.h>
-#include <channel.h>
-#include <run.h>
-#include <sleep_for.h>
-#include <task.h>
+#include <async/all.h>
+#include <async/channel.h>
+#include <async/run.h>
+#include <async/sleep_for.h>
+#include <async/task.h>
 
 using namespace async;
 using namespace std::chrono_literals;

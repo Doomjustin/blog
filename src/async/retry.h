@@ -7,10 +7,10 @@
 #include <optional>
 #include <system_error>
 
-#include <exceptions.h>
-#include <operation.h>
-#include <sleep_for.h>
-#include <timeout.h>
+#include <common/exceptions.h>
+#include <async/operation.h>
+#include <async/sleep_for.h>
+#include <async/timeout.h>
 
 namespace async {
 

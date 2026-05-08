@@ -4,9 +4,9 @@
 #include <cstddef>
 #include <expected>
 
-#include <exceptions.h>
-#include <io_context.h>
-#include <operation.h>
+#include <common/exceptions.h>
+#include <async/io_context.h>
+#include <async/operation.h>
 
 namespace async {
 

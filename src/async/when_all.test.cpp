@@ -1,4 +1,4 @@
-#include <when_all.h>
+#include <async/when_all.h>
 
 #include <cerrno>
 #include <coroutine>
@@ -8,7 +8,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <when_any.h>
+#include <async/when_any.h>
 
 namespace {
 

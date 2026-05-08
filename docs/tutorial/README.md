@@ -48,4 +48,4 @@
 ## 附录
 
 - [附录：跨线程通信基准测试——ChannelPipe vs Asio](16_benchmark.md)
-- [附录：手写 Awaiter——将同步/回调 API 桥接到协程](17_custom_awaiter.md)
+- [附录：CPU 密集型任务的工作线程适配](17_custom_awaiter.md)

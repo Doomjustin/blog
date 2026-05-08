@@ -6,9 +6,9 @@
 #include <thread>
 #include <vector>
 
-#include <co_spawn.h>
-#include <task.h>
-#include <this_coroutine.h>
+#include <async/co_spawn.h>
+#include <async/task.h>
+#include <async/this_coroutine.h>
 
 namespace async {
 

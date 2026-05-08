@@ -17,8 +17,8 @@
 #include <gsl/pointers>
 #include <liburing.h>
 
-#include <common.h>
-#include <operation.h>
+#include <common/common.h>
+#include <async/operation.h>
 
 namespace async {
 

@@ -1,7 +1,7 @@
 #ifndef BLOG_NET_QUERY_ENDPOINT_H
 #define BLOG_NET_QUERY_ENDPOINT_H
 
-#include <operations.h>
+#include <net/operations.h>
 
 namespace net {
 

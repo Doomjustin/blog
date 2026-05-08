@@ -2,8 +2,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <ip/address.h>
-#include <ip/tcp.h>
+#include <net/ip/address.h>
+#include <net/ip/tcp.h>
 
 using namespace net::ip;
 using Endpoint = tcp::endpoint;

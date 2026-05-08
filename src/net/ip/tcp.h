@@ -3,9 +3,9 @@
 
 #include <netinet/in.h>
 
-#include <acceptor.h>
-#include <ip/endpoint.h>
-#include <ip/stream_socket.h>
+#include <net/acceptor.h>
+#include <net/ip/endpoint.h>
+#include <net/ip/stream_socket.h>
 
 namespace net::ip {
 
