@@ -1,4 +1,4 @@
-#include <async/scope.h>
+#include <async/task_group.h>
 
 #include <atomic>
 #include <chrono>
@@ -33,7 +33,7 @@ TEST_CASE("scope: join waits for all spawned tasks", "[async][scope]")
     std::atomic_int completed{ 0 };
 
     async::run([&]() -> async::Task<> {
-        auto group = async::scope();
+        auto group = async::task_group();
 
         group.spawn(delayed_increment(completed, 5ms));
         group.spawn(delayed_increment(completed, 10ms));
@@ -49,7 +49,7 @@ TEST_CASE("scope: request_stop releases stop-aware children before join returns"
     std::atomic_bool stopped{ false };
 
     async::run([&]() -> async::Task<> {
-        auto group = async::scope();
+        auto group = async::task_group();
 
         group.spawn(wait_for_scope_stop(stopped, group.stop_token()));
         co_await async::sleep_for(1ms);
@@ -67,7 +67,7 @@ TEST_CASE("scope: destruction requests stop for spawned children", "[async][scop
 
     async::run([&]() -> async::Task<> {
         {
-            auto group = async::scope();
+            auto group = async::task_group();
             group.spawn(wait_for_scope_stop(stopped, group.stop_token()));
         }
 
@@ -79,7 +79,7 @@ TEST_CASE("scope: destruction requests stop for spawned children", "[async][scop
 
 TEST_CASE("scope: spawn after join is rejected", "[async][scope]")
 {
-    async::Scope group;
+    async::TaskGroup group;
 
     auto join_task = group.join();
     REQUIRE_FALSE(join_task.done());

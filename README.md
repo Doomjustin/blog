@@ -117,3 +117,4 @@ int main()
 | [10](docs/blogs/10_API重构_让用户不再关心IOContext.md) | API 重构：让用户不再关心 IOContext |
 | [11](docs/blogs/11_停止机制补完.md) | 停止机制补完 |
 | [12](docs/blogs/12_零拷贝发送_SEND_ZC两阶段完成.md) | 零拷贝发送：SEND_ZC 两阶段完成 |
+| [13](docs/blogs/13_聊天室实现.md) | Chat Room 实现说明 |

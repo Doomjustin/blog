@@ -18,13 +18,13 @@
 #include <async/retry.h>
 #include <async/run.h>
 #include <async/run_on_thread.h>
-#include <async/scope.h>
 #include <async/signals.h>
 #include <async/single_operation.h>
 #include <async/sleep_for.h>
 #include <async/stop_requested_awaiter.h>
 #include <async/stop_then.h>
 #include <async/task.h>
+#include <async/task_group.h>
 #include <async/this_coroutine.h>
 #include <async/timeout.h>
 #include <async/when_all.h>

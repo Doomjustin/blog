@@ -105,9 +105,9 @@ auto session(net::ip::tcp::socket sock,
     // Capacity 64: enough to buffer a burst before applying back-pressure.
     async::Channel<std::string> outbox{ 64 };
 
-    // Use a Scope so the writer task cannot outlive the socket.
-    async::Scope scope;
-    scope.spawn(write_loop(sock, outbox));
+    // Use a TaskGroup so the writer task cannot outlive the socket.
+    async::TaskGroup group;
+    group.spawn(write_loop(sock, outbox));
 
     auto stream = sock.receive_stream();
     std::string pending;
@@ -120,7 +120,7 @@ auto session(net::ip::tcp::socket sock,
         if (!chunk || chunk->data().empty()) {
             log::info("[server] {} disconnected before sending username", peer);
             outbox.close();
-            co_await scope.join();
+            co_await group.join();
             co_return;
         }
         pending += as_string(chunk->data());
@@ -162,7 +162,7 @@ auto session(net::ip::tcp::socket sock,
     co_await room.announce(std::format("[server] {} left the room.\n", username));
     log::info("[server] {} ({}) disconnected", username, peer);
 
-    co_await scope.join(); // wait for writer to finish draining
+    co_await group.join(); // wait for writer to finish draining
 }
 
 // ── Server ────────────────────────────────────────────────────────────────────

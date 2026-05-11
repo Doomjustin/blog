@@ -7,8 +7,8 @@
 #include <utility>
 
 #include <async/awaitable.h>
-#include <async/scope.h>
 #include <async/task.h>
+#include <async/task_group.h>
 
 namespace async {
 
@@ -64,13 +64,13 @@ concept stop_awaitable_provider
  * from applying Heap Elision Optimization to this coroutine frame. The frame
  * must outlive the spawning site (it lives until the inner task finishes and
  * request_stop is called), so eliding the heap allocation and placing the frame
- * on the call stack would produce a dangling reference to `scope`.
+ * on the call stack would produce a dangling reference to `group`.
  */
 template<stop_awaitable_provider Provider>
-auto any_spawned_task(Provider provider, Scope& scope) -> Task<>
+auto any_spawned_task(Provider provider, TaskGroup& group) -> Task<>
 {
-    co_await std::move(provider)(scope.stop_token());
-    scope.request_stop();
+    co_await std::move(provider)(group.stop_token());
+    group.request_stop();
 }
 
 template<stop_awaitable_provider... Providers>
@@ -78,9 +78,9 @@ auto any(Providers&&... providers) -> Task<>
 {
     static_assert(sizeof...(Providers) > 0, "any requires at least one provider");
 
-    Scope scope;
-    (scope.spawn(any_spawned_task(std::forward<Providers>(providers), scope)), ...);
-    co_await scope.join();
+    TaskGroup group;
+    (group.spawn(any_spawned_task(std::forward<Providers>(providers), group)), ...);
+    co_await group.join();
 }
 
 } // namespace async

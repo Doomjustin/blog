@@ -48,7 +48,7 @@ int main(int argc, char* argv[])
         for (int i = 0; i < CLIENT_COUNT; ++i)
             clients.push_back(run_client(port));
 
-        async::Scope group;
+        async::TaskGroup group;
         for (auto& c : clients) group.spawn(std::move(c));
         co_await group.join();
     });

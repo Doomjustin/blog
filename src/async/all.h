@@ -4,8 +4,8 @@
 #include <utility>
 
 #include <async/awaitable.h>
-#include <async/scope.h>
 #include <async/task.h>
+#include <async/task_group.h> // TaskGroup
 
 namespace async {
 
@@ -17,9 +17,9 @@ auto all(Awaitables&&... awaitables) -> Task<>
 {
     static_assert(sizeof...(Awaitables) > 0, "all requires at least one awaitable");
 
-    Scope scope;
-    (scope.spawn(std::forward<Awaitables>(awaitables)), ...);
-    co_await scope.join();
+    TaskGroup group;
+    (group.spawn(std::forward<Awaitables>(awaitables)), ...);
+    co_await group.join();
 }
 
 } // namespace async

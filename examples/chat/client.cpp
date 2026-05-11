@@ -1,27 +1,10 @@
-// Interactive TCP chat client
-//
-// Usage: ./chat_client [host] [port]   (defaults: 127.0.0.1 9090)
-//
-// Workflow:
-//   1. Connect to the chat server.
-//   2. Enter your username when prompted (first line sent).
-//   3. Type messages and press Enter to send.
-//   4. Messages from other users appear inline.
-//   5. Press Ctrl+D (or Ctrl+C) to exit.
-//
-// Concurrency model:
-//   - A co_spawned `receiver` task continuously reads server output and
-//     prints it to stdout.  When the server closes the connection it calls
-//     async::stop(), which cancels the in-flight run_on_thread call in the
-//     sender loop, making the main coroutine exit cleanly.
-//   - The sender loop calls run_on_thread for each blocking getline so the
-//     IOContext is never blocked on stdin.
-
 #include <cstdlib>
 #include <format>
 #include <functional>
 #include <iostream>
 #include <string>
+
+#include "async/run.h"
 
 #include <blog.h>
 
@@ -41,13 +24,13 @@ auto handle_terminal(net::ip::tcp::socket& socket, std::stop_token token) -> asy
 
     std::string_view name(buffer.data(), *read_res);
 
-    auto send_res = co_await net::send(socket, async::buffer(name));
+    auto send_res = co_await async::stop_then(net::send(socket, async::buffer(name)), token);
     if (!send_res) {
         log::error("[client] 发送用户名失败: {}", send_res.error());
         co_return;
     }
 
-    while (!token.stop_requested()) {
+    while (true) {
         auto read_res = co_await async::stop_then(input.async_read(async::buffer(buffer)), token);
         if (!read_res || *read_res == 0) 
             break; // EOF or error
@@ -56,7 +39,7 @@ auto handle_terminal(net::ip::tcp::socket& socket, std::stop_token token) -> asy
         // ignore empty lines to avoid sending unnecessary messages to the server
         if (line == "\n") continue;
 
-        auto send_res = co_await net::send(socket, async::buffer(line));
+        auto send_res = co_await async::stop_then(net::send(socket, async::buffer(line)), token);
         if (!send_res) {
             log::error("[input] 发送消息失败: {}", send_res.error());
             co_return;
@@ -70,8 +53,8 @@ auto handle_server(net::ip::tcp::socket& socket, std::stop_token token) -> async
     auto stream = socket.receive_stream();
     auto output = fs::async_stdout();
 
-    while (!token.stop_requested()) {
-        auto chunk = co_await stream.next();
+    while (true) {
+        auto chunk = co_await async::stop_then(stream.next(), token);
         if (!chunk || chunk->data().empty()) {
             log::info("[server] connection closed.");
             break;

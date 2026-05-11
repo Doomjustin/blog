@@ -1,17 +1,22 @@
 #ifndef BLOG_NET_RECEIVE_STREAM_H
 #define BLOG_NET_RECEIVE_STREAM_H
 
+#include <cerrno>
 #include <coroutine>
 #include <cstdint>
 #include <deque>
 #include <expected>
 #include <system_error>
 
+#include <net/pooled_buffer.h>
+
 #include <liburing.h>
 #include <liburing/io_uring.h>
 
+#include "async/io_context.h"
+#include "async/operation.h"
+
 #include <async/async.h>
-#include <net/pooled_buffer.h>
 
 namespace net {
 
@@ -37,7 +42,7 @@ public:
      * Suspends the coroutine if no data is currently buffered; resumes
      * immediately when the stream has a pending result queued.
      */
-    class NextAwaiter {
+    class NextAwaiter: public async::CancelableOperation {
     public:
         using resume_type = PooledBuffer;
 
@@ -50,8 +55,31 @@ public:
         auto await_suspend(std::coroutine_handle<> handle) noexcept -> bool;
         auto await_resume() -> std::expected<resume_type, std::error_code>;
 
+        void complete(int result, std::uint32_t flags) noexcept override
+        {
+            if (result == -ECANCELED) is_canceling_ = true;
+            this->resume(handle_, result, flags);
+        }
+
+        void cancel() noexcept override
+        {
+            if (stream_.cancel_operation_ == this) {
+                stream_.cancel_operation_ = nullptr;
+                is_canceling_ = true;
+                
+                this->scheduled_result_ = -ECANCELED;
+                stream_.context_->submit(this);
+            }
+        }
+
+        auto context() noexcept -> async::IOContext&
+        {
+            return *stream_.context_;
+        }
+
     private:
         ReceiveStream& stream_;
+        std::coroutine_handle<> handle_{ nullptr };
     };
 
 
@@ -95,7 +123,8 @@ private:
     MutishotReceiveOperation* operation_{ nullptr };
     bool operation_armed_{ false };
 
-    std::coroutine_handle<> handle_{ nullptr };
+    // std::coroutine_handle<> handle_{ nullptr };
+    async::CancelableOperation* cancel_operation_{ nullptr };
     std::deque<result_type> ready_results_;
 
     auto arm_operation() -> bool;

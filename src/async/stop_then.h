@@ -11,11 +11,10 @@
 
 #include <async/operation.h>
 #include <async/post.h>
-#include <async/single_operation.h>
 
 namespace async {
 
-template<single_shot_operation Op>
+template<cancelable_operation Op>
 class StopTokenWrapper: public CancelableOperation {
 public:
     using resume_type = typename Op::resume_type;
@@ -104,7 +103,7 @@ private:
 };
 
 
-template<single_shot_operation Op>
+template<cancelable_operation Op>
 auto stop_then(Op&& operation, std::stop_token token)
 {
     return StopTokenWrapper<std::decay_t<Op>>{ std::forward<Op>(operation), std::move(token) };

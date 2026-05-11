@@ -1,5 +1,5 @@
-#ifndef BLOG_ASYNC_SCOPE_H
-#define BLOG_ASYNC_SCOPE_H
+#ifndef BLOG_ASYNC_TASK_GROUP_H
+#define BLOG_ASYNC_TASK_GROUP_H
 
 #include <atomic>
 #include <memory>
@@ -42,19 +42,19 @@ auto scoped_task(Awaitable awaitable, std::shared_ptr<ScopeState> state) -> Task
 
 } // namespace detail
 
-class Scope {
+class TaskGroup {
 public:
-    explicit Scope(IOContext& context = this_coroutine::context())
+    explicit TaskGroup(IOContext& context = this_coroutine::context())
       : state_{ std::make_shared<detail::ScopeState>(context) }
     {}
 
-    Scope(const Scope&) = delete;
-    auto operator=(const Scope&) -> Scope& = delete;
+    TaskGroup(const TaskGroup&) = delete;
+    auto operator=(const TaskGroup&) -> TaskGroup& = delete;
 
-    Scope(Scope&&) noexcept = default;
-    auto operator=(Scope&&) noexcept -> Scope& = default;
+    TaskGroup(TaskGroup&&) noexcept = default;
+    auto operator=(TaskGroup&&) noexcept -> TaskGroup& = default;
 
-    ~Scope()
+    ~TaskGroup()
     {
         if (state_) {
             closed_ = true;
@@ -67,7 +67,7 @@ public:
     void spawn(Awaitable awaitable)
     {
         if (closed_)
-            throw std::logic_error{ "Cannot spawn after join on async::Scope" };
+            throw std::logic_error{ "Cannot spawn after join on async::TaskGroup" };
 
         state_->pending_.fetch_add(1, std::memory_order_relaxed);
         co_spawn(detail::scoped_task(std::move(awaitable), state_), *state_->context_);
@@ -106,11 +106,11 @@ private:
     bool closed_{ false };
 };
 
-inline auto scope(IOContext& context = this_coroutine::context()) -> Scope
+inline auto task_group(IOContext& context = this_coroutine::context()) -> TaskGroup
 {
-    return Scope{ context };
+    return TaskGroup{ context };
 }
 
 } // namespace async
 
-#endif // BLOG_ASYNC_SCOPE_H
+#endif // BLOG_ASYNC_TASK_GROUP_H

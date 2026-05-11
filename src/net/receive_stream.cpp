@@ -2,6 +2,8 @@
 
 #include <utility>
 
+#include "common/exceptions.h"
+
 #include <async/async.h>
 #include <common/common.h>
 
@@ -76,14 +78,15 @@ auto ReceiveStream::NextAwaiter::await_ready() const noexcept -> bool
 
 auto ReceiveStream::NextAwaiter::await_suspend(std::coroutine_handle<> handle) noexcept -> bool
 {
-    stream_.handle_ = handle;
+    handle_ = handle;
+    stream_.cancel_operation_ = this;
 
     // 如果当前没有正在进行的操作，就立刻提交一个新的recv_multishot；
     // 如果有了，说明它完成后会resume这个协程，我们就不需要再提交了
     if (!stream_.operation_armed_) {
         if (!stream_.arm_operation()) {
-            stream_.ready_results_.emplace_back(
-                unexpected_system_error(EAGAIN));
+            stream_.cancel_operation_ = nullptr;
+            stream_.ready_results_.emplace_back(unexpected_system_error(EAGAIN));
             return false;
         }
     }
@@ -93,15 +96,19 @@ auto ReceiveStream::NextAwaiter::await_suspend(std::coroutine_handle<> handle) n
 
 auto ReceiveStream::NextAwaiter::await_resume() -> std::expected<resume_type, std::error_code>
 {
-    if (stream_.ready_results_.empty())
+    if (!stream_.ready_results_.empty()) {
+        // 从对列里取出一个结果返回；
+        // 如果是取消操作导致的CQE，那么这个结果就是一个unexpected error，
+        // 调用者会得到一个std::error_code为operation_canceled的错误
+        auto result = std::move(stream_.ready_results_.front());
+        stream_.ready_results_.pop_front();
+        return result;
+    }
+
+    if (is_canceling_)
         return unexpected_system_error(std::errc::operation_canceled);
 
-    // 从对列里取出一个结果返回；
-    // 如果是取消操作导致的CQE，那么这个结果就是一个unexpected error，
-    // 调用者会得到一个std::error_code为operation_canceled的错误
-    auto result = std::move(stream_.ready_results_.front());
-    stream_.ready_results_.pop_front();
-    return result;
+    return unexpected_system_error(std::errc::operation_canceled); // 理论上不应该到这里
 }
 
 
@@ -117,7 +124,7 @@ ReceiveStream::ReceiveStream(ReceiveStream&& other) noexcept
     bgid_{ std::exchange(other.bgid_, 0) },
     operation_{ std::exchange(other.operation_, nullptr) },
     operation_armed_{ std::exchange(other.operation_armed_, false) },
-    handle_{ std::exchange(other.handle_, nullptr) },
+    cancel_operation_{ std::exchange(other.cancel_operation_, nullptr) },
     ready_results_{ std::move(other.ready_results_) }
 {
     if (operation_)
@@ -135,7 +142,7 @@ auto ReceiveStream::operator=(ReceiveStream&& other) noexcept -> ReceiveStream&
     bgid_ = std::exchange(other.bgid_, 0);
     operation_ = std::exchange(other.operation_, nullptr);
     operation_armed_ = std::exchange(other.operation_armed_, false);
-    handle_ = std::exchange(other.handle_, nullptr);
+    cancel_operation_ = std::exchange(other.cancel_operation_, nullptr);
     ready_results_ = std::move(other.ready_results_);
 
     if (operation_)
@@ -212,9 +219,9 @@ void ReceiveStream::handle_cqe(int result, std::uint32_t flags) noexcept
         ready_results_.emplace_back(unexpected_system_error(-result));
     }
 
-    if (handle_) {
-        auto handle = std::exchange(handle_, nullptr);
-        handle.resume();
+    if (cancel_operation_) {
+        auto* op = std::exchange(cancel_operation_, nullptr);
+        op->complete(0, 0);
     }
 }
 
