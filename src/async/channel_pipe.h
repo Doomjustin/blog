@@ -570,6 +570,24 @@ public:
         return SendAwaiter{ core_, std::move(value) };
     }
 
+    auto try_send(T value) -> bool
+    {
+        if (core_->sender_closed_)
+            return false;
+
+        if (core_->free_list_ != nullptr) {
+            auto* op = core_->free_list_;
+            core_->free_list_ = op->pool_next;
+            op->pool_next = nullptr;
+            op->value.emplace(std::move(value));
+            op->core = core_;
+            core_->receiver_ctx->post(op);
+            return true;
+        }
+        
+        return false;
+    }
+
     /**
      * @brief Close the sender side of the channel.  Idempotent.
      *
@@ -641,6 +659,23 @@ public:
      */
     [[nodiscard]]
     auto receive() -> ReceiveAwaiter { return ReceiveAwaiter{ core_ }; }
+
+    auto try_receive() -> std::optional<T>
+    {
+        if (!core_ || (core_->sender_done_ && core_->data_node_queue_.empty()))
+            return {};
+
+        if (!core_->data_node_queue_.empty()) {
+            auto* node = core_->data_node_queue_.front();
+            core_->data_node_queue_.pop_front();
+            T value = std::move(node->value.value());
+            node->value.reset();
+            core_->recycle_node(node);
+            return value;
+        }
+
+        return {};
+    }
 
     /**
      * @brief Close the receiver side of the channel.  Idempotent.

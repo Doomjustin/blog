@@ -179,6 +179,58 @@ public:
         return SendAwaiter{*this, std::move(value)}; 
     }
 
+    auto try_send(T value) -> bool 
+    {
+        assert(owner_ctx_->is_owner_thread() &&
+               "Channel: send must be co_await-ed on the owner IOContext thread");
+
+        if (closed_)
+            return false; // closed, cannot send
+
+        if (!waiting_receivers_.empty()) {
+            auto* recv = static_cast<ReceiveAwaiter*>(waiting_receivers_.pop_front());
+            recv->in_queue_ = false;
+            recv->value_.emplace(std::move(value));
+            wake_awaiter(recv, 1); // 1 = sent directly to receiver
+            return true;
+        }
+
+        if (count_ < capacity_) {
+            buffer_[(head_idx_ + count_) % capacity_] = std::move(value);
+            ++count_;
+            return true;
+        }
+
+        return false; // full, cannot send
+    }
+
+    auto try_receive() -> std::optional<T>
+    {
+        assert(owner_ctx_->is_owner_thread() &&
+               "Channel: receive must be co_await-ed on the owner IOContext thread");
+
+        if (closed_ && count_ == 0)
+            return {}; // closed and empty
+
+        if (!waiting_senders_.empty()) {
+            auto* op = waiting_senders_.pop_front();
+            auto* sender = static_cast<SendAwaiter*>(op);
+            sender->in_queue_ = false;
+            sender->ok_ = true;
+            wake_awaiter(sender, 1); // 1 = sent directly from sender
+            return std::move(sender->value_);
+        }
+
+        if (count_ > 0) {
+            T value = std::move(buffer_[head_idx_]);
+            head_idx_ = (head_idx_ + 1) % capacity_;
+            --count_;
+            return value;
+        }
+
+        return {};
+    }
+
     [[nodiscard]]
     auto receive() -> ReceiveAwaiter 
     { 

@@ -9,8 +9,10 @@
 
 #include <cstdlib>
 #include <format>
+#include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <blog.h>
 
@@ -25,6 +27,11 @@ namespace {
 //
 // All methods run on the single IOContext thread → no locking required.
 struct Room {
+    struct EvictedClient {
+        uint64_t id;
+        std::string name;
+    };
+
     struct Client {
         std::string name;
         async::Channel<std::string>* outbox; // owned by the session coroutine
@@ -40,42 +47,88 @@ struct Room {
         return id;
     }
 
-    void leave(uint64_t id) { clients_.erase(id); }
-
     auto name_of(uint64_t id) const -> std::string
     {
         auto it = clients_.find(id);
         return it != clients_.end() ? it->second.name : std::string{ "unknown" };
     }
 
+    auto remove(uint64_t id) -> std::optional<EvictedClient>
+    {
+        auto it = clients_.find(id);
+        if (it == clients_.end()) return std::nullopt;
+
+        auto evicted = EvictedClient{ .id=id, .name=it->second.name };
+        if (it->second.outbox)
+            it->second.outbox->close();
+
+        clients_.erase(it);
+        return evicted;
+    }
+
+    auto leave(uint64_t id) -> std::optional<EvictedClient> { return remove(id); }
+
     // Deliver msg to every client except the sender.
     // co_await-based so back-pressure is handled naturally.
-    auto broadcast(uint64_t from_id, std::string msg) -> async::Task<>
+    auto broadcast(uint64_t from_id, const std::string& msg) -> std::vector<EvictedClient>
     {
+        std::vector<uint64_t> slow_clients;
+
         for (auto& [id, client] : clients_) {
             if (id == from_id) continue;
             
-            auto res = co_await async::timeout(client.outbox->send(msg), 100ms);
-            if (!res) {
-                log::warning("[room] Client {} is too slow or disconnected; closing its channel", client.name);
-                client.outbox->close();
-            }
-
+            if (!client.outbox->try_send(msg))
+                slow_clients.push_back(id);
         }
+
+        return evict_clients(slow_clients);
     }
 
     // Deliver a system message to all clients (including the trigger if still registered).
-    auto announce(std::string msg) -> async::Task<>
+    auto announce(const std::string& msg) -> std::vector<EvictedClient>
     {
+        std::vector<uint64_t> slow_clients;
+
         for (auto& [id, client] : clients_) {
-            auto res = co_await async::timeout(client.outbox->send(msg), 100ms);
-            if (!res) {
-                log::warning("[room] Client {} is too slow or disconnected; closing its channel", client.name);
-                client.outbox->close();
-            }
+            if (!client.outbox->try_send(msg))
+                slow_clients.push_back(id);
         }
+
+        return evict_clients(slow_clients);
+    }
+
+private:
+    auto evict_clients(const std::vector<uint64_t>& ids) -> std::vector<EvictedClient>
+    {
+        std::vector<EvictedClient> evicted;
+        evicted.reserve(ids.size());
+
+        for (auto id : ids) {
+            auto removed = remove(id);
+            if (!removed) continue;
+
+            log::warning("[room] evict {}({}): slow consumer timeout", removed->name, removed->id);
+            evicted.push_back(std::move(*removed));
+        }
+
+        return evicted;
     }
 };
+
+auto announce_evictions(Room& room, std::vector<Room::EvictedClient> evicted) -> void
+{
+    while (!evicted.empty()) {
+        std::vector<Room::EvictedClient> next_evicted;
+
+        for (const auto& client : evicted) {
+            auto msg = std::format("[server] {} was removed (slow consumer timeout).\n", client.name);
+            auto chained = room.announce(msg);
+            next_evicted.insert(next_evicted.end(), chained.begin(), chained.end());
+        }
+
+        evicted = std::move(next_evicted);
+    }
+}
 
 // ── Writer task ───────────────────────────────────────────────────────────────
 
@@ -146,7 +199,8 @@ auto session(net::ip::tcp::socket sock,
                                      username, room.clients_.size() + 1));
 
     uint64_t id = room.join(username, outbox);
-    co_await room.announce(std::format("[server] {} joined the room.\n", username));
+    auto join_evicted = room.announce(std::format("[server] {} joined the room.\n", username));
+    announce_evictions(room, std::move(join_evicted));
     log::info("[server] {} ({}) joined the room", username, peer);
 
     // ── Main read loop ───────────────────────────────────────────────────────
@@ -165,14 +219,19 @@ auto session(net::ip::tcp::socket sock,
             if (line.empty()) continue; // skip blank lines
             auto msg = std::format("[{}] {}\n", username, line);
             log::info("{}", msg);
-            co_await room.broadcast(id, msg);
+            auto evicted = room.broadcast(id, msg);
+            announce_evictions(room, std::move(evicted));
         }
     }
 
     // ── Cleanup ──────────────────────────────────────────────────────────────
-    room.leave(id);
+    auto left = room.leave(id);
     outbox.close(); // signals write_loop to exit after draining
-    co_await room.announce(std::format("[server] {} left the room.\n", username));
+    if (left)
+        username = left->name;
+
+    auto leave_evicted = room.announce(std::format("[server] {} left the room.\n", username));
+    announce_evictions(room, std::move(leave_evicted));
     log::info("[server] {} ({}) disconnected", username, peer);
 
     co_await group.join(); // wait for writer to finish draining
