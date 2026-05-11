@@ -12,13 +12,14 @@
 
 #include <sys/eventfd.h>
 #include <sys/poll.h>
+#include <sys/uio.h>
 
 #include <gsl/gsl>
 #include <gsl/pointers>
 #include <liburing.h>
 
-#include <common/common.h>
 #include <async/operation.h>
+#include <common/common.h>
 
 namespace async {
 

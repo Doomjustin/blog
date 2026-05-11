@@ -34,7 +34,7 @@ template<typename FileType>
 auto async_open(async::IOContext& context,
                 const std::string& path,
                 BaseFile::flag flags,
-                BaseFile::mode permissions = BaseFile::mode::rw_r_r)
+                BaseFile::permission permissions = BaseFile::permission::rw_r_r)
     -> async::Task<FileType>
 {
     auto result = co_await OpenAwaiter{ context, path, flags, permissions };

@@ -27,4 +27,18 @@ auto as_string(std::span<const std::byte> data) -> std::string_view;
  */
 auto as_string(std::span<std::byte> data) -> std::string_view;
 
+
+template<std::ranges::contiguous_range T>
+auto as_string(const T& range) -> std::string_view
+{
+    return as_string(std::as_bytes(std::span{ range }));
+}
+
+template<std::ranges::contiguous_range T>
+    requires (!std::is_const_v<std::remove_reference_t<std::ranges::range_reference_t<T>>>)
+auto as_string(T& range) -> std::string_view
+{
+    return as_string(std::as_writable_bytes(std::span{ range }));
+}
+
 #endif // BLOG_COMMON_AS_STRING_H

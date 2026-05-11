@@ -6,11 +6,7 @@
 
 namespace fs {
 
-BaseFile::BaseFile(async::IOContext& context)
-  : context_{ &context }
-{}
-
-BaseFile::BaseFile(int fd, async::IOContext& context) noexcept
+BaseFile::BaseFile(async::IOContext& context, int fd) noexcept
   : context_{ &context },
     fd_{ fd }
 {}
@@ -30,24 +26,10 @@ auto BaseFile::operator=(BaseFile&& other) noexcept -> BaseFile&
     return *this;
 }
 
-BaseFile::BaseFile(const std::string& path, flag flags, mode permissions, async::IOContext& context)
-  : context_{ &context }
-{
-    open(path, flags, permissions);
-}
-
 BaseFile::~BaseFile()
 {
     close();
 }
-
-void BaseFile::open(const std::string& path, flag flags, mode permissions)
-{
-    fd_ = ::open(path.data(), std::to_underlying(flags), std::to_underlying(permissions));
-    if (fd_ == invalid_fd)
-        throw_system_error("Failed to open file '{}'", path);
-}
-
 void BaseFile::close()
 {
     if (!is_open()) return;

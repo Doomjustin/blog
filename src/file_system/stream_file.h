@@ -9,6 +9,8 @@
 
 #include <unistd.h>
 
+#include "async/io_context.h"
+
 #include <async/async.h>
 #include <file_system/base_file.h>
 #include <file_system/read_awaiter.h>
@@ -18,7 +20,13 @@ namespace fs {
 
 class StreamFile : public BaseFile {
 public:
-    using BaseFile::BaseFile;
+    StreamFile(async::IOContext& context, const std::string& path, flag flags);
+
+    StreamFile(async::IOContext& context, const std::string& path, flag flags, permission perms);
+
+    StreamFile(const std::string& path, flag flags);
+
+    StreamFile(const std::string& path, flag flags, permission perms);
 
     [[nodiscard]]
     auto async_read(std::span<std::byte> buffer) -> ReadAwaiter
@@ -39,6 +47,8 @@ public:
             return unexpected_system_error(errno);
         return result;
     }
+    
+    static auto open(const std::string& path, flag flags, permission permissions = permission::none) -> int;
 };
 
 } // namespace fs

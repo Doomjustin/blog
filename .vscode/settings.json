@@ -23,5 +23,6 @@
   "cmake.debugConfig": {
     "type": "lldb-dap",
     "miDebuggerPath": "/home/doom/llvm-project/build/bin/lldb-dap"
-  }
+  },
+  "workbench.colorCustomizations": { "activityBar.border": "#e0e0e0", "sideBar.border": "#e0e0e0" }
 }

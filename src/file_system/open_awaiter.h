@@ -24,8 +24,7 @@ namespace fs {
  */
 class OpenAwaiter: public async::SingleOperation<OpenAwaiter, int> {
 public:
-    OpenAwaiter(context_type& context, std::string path,
-                BaseFile::flag flags, BaseFile::mode permissions)
+    OpenAwaiter(context_type& context, std::string path, BaseFile::flag flags, BaseFile::permission permissions)
       : async::SingleOperation<OpenAwaiter, int>{ context },
         path_{ std::move(path) },
         flags_{ static_cast<int>(std::to_underlying(flags)) },
