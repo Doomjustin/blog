@@ -14,6 +14,8 @@
 
 #include <blog.h>
 
+using namespace std::chrono_literals;
+
 namespace {
 
 // ── Room ──────────────────────────────────────────────────────────────────────
@@ -34,7 +36,7 @@ struct Room {
     auto join(std::string name, async::Channel<std::string>& outbox) -> uint64_t
     {
         uint64_t id = next_id_++;
-        clients_[id] = { std::move(name), &outbox };
+        clients_[id] = { .name=std::move(name), .outbox=&outbox };
         return id;
     }
 
@@ -52,15 +54,26 @@ struct Room {
     {
         for (auto& [id, client] : clients_) {
             if (id == from_id) continue;
-            co_await client.outbox->send(msg);
+            
+            auto res = co_await async::timeout(client.outbox->send(msg), 100ms);
+            if (!res) {
+                log::warning("[room] Client {} is too slow or disconnected; closing its channel", client.name);
+                client.outbox->close();
+            }
+
         }
     }
 
     // Deliver a system message to all clients (including the trigger if still registered).
     auto announce(std::string msg) -> async::Task<>
     {
-        for (auto& [id, client] : clients_)
-            co_await client.outbox->send(msg);
+        for (auto& [id, client] : clients_) {
+            auto res = co_await async::timeout(client.outbox->send(msg), 100ms);
+            if (!res) {
+                log::warning("[room] Client {} is too slow or disconnected; closing its channel", client.name);
+                client.outbox->close();
+            }
+        }
     }
 };
 
@@ -144,7 +157,7 @@ auto session(net::ip::tcp::socket sock,
                 log::error("[server] recv error from {}: {}", peer, chunk.error());
             break;
         }
-        if (chunk->data().empty()) break; // EOF
+        if (chunk->empty()) break; // EOF
 
         pending += as_string(chunk->data());
 

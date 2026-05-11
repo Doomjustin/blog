@@ -88,6 +88,18 @@ public:
         return buffer_;
     }
 
+    [[nodiscard]]
+    constexpr auto empty() const noexcept -> bool
+    {
+        return buffer_.empty();
+    }
+
+    [[nodiscard]]
+    constexpr auto size() const noexcept -> std::size_t
+    {
+        return buffer_.size();
+    }
+
     /**
      * @brief Check whether this handle refers to a valid buffer slot.
      *

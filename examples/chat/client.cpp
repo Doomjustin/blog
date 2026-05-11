@@ -55,19 +55,13 @@ auto handle_server(net::ip::tcp::socket& socket, std::stop_token token) -> async
 
     while (true) {
         auto chunk = co_await async::stop_then(stream.next(), token);
-        if (!chunk || chunk->data().empty()) {
+        if (!chunk || chunk->empty()) {
             log::info("[server] connection closed.");
-            break;
+            co_return;
         }
 
         co_await async::stop_then(output.async_write(chunk->data()), token);
     }
-}
-
-auto session(net::ip::tcp::socket socket) -> async::Task<>
-{
-    co_await async::any(async::task(handle_terminal, std::ref(socket)), 
-                        async::task(handle_server, std::ref(socket)));
 }
 
 auto client(std::string_view host, std::uint16_t port) -> async::Task<>
@@ -77,11 +71,13 @@ auto client(std::string_view host, std::uint16_t port) -> async::Task<>
         auto endpoint = net::ip::tcp::endpoint{ net::ip::Address::from_string(host), port };
         net::ip::tcp::socket socket{ endpoint.protocol() };
         socket.connect(endpoint);
-        co_await session(std::move(socket));
+        co_await async::any(async::task(handle_terminal, std::ref(socket)), 
+                            async::task(handle_server, std::ref(socket)));
     } catch (const std::exception& ex) {
         log::error("[client] 连接失败: {}", ex.what());
-        async::stop();
     }
+
+    async::stop();
 }
 
 auto shutdown_monitor() -> async::Task<>
