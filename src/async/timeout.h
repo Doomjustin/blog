@@ -11,11 +11,11 @@
 
 #include <liburing.h>
 
-#include <common/common.h>
 #include <async/operation.h>
 #include <async/single_operation.h>
 #include <async/sleep_for.h>
 #include <async/when_any.h>
+#include <common/common.h>
 
 namespace async {
 
@@ -178,9 +178,7 @@ public:
     {
         if (inner_.winner() == 1)
             return unexpected_system_error(std::errc::timed_out);
-        // Op won. In the homogeneous (void) case await_resume() returns
-        // expected<void>; in the heterogeneous case it returns a variant —
-        // pull index 0 in that case.
+
         if constexpr (std::is_void_v<resume_type>) {
             return inner_.await_resume();
         } else {
@@ -223,7 +221,8 @@ private:
 template<single_shot_operation Operation, chrono_duration Duration>
 auto timeout(Operation&& operation, Duration dur)
 {
-    return TimeoutAwaiter<std::decay_t<Operation>>{ std::forward<Operation>(operation), dur };
+    using CancelableOperation = std::remove_cvref_t<Operation>;
+    return TimeoutAwaiter<CancelableOperation>{ std::forward<Operation>(operation), dur };
 }
 
 /**
@@ -248,8 +247,9 @@ template<cancelable_operation Operation, chrono_duration Duration>
     requires (!single_shot_operation<Operation>)
 auto timeout(Operation&& operation, Duration dur)
 {
+    using CancelableOperation = std::remove_cvref_t<Operation>;
     auto& ctx = operation.context();
-    return TimeoutWrapper<std::decay_t<Operation>>{ std::forward<Operation>(operation), TimerAwaier{ ctx, dur } };
+    return TimeoutWrapper<CancelableOperation>{ std::forward<Operation>(operation), TimerAwaier{ ctx, dur } };
 }
 
 } // namespace async

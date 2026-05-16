@@ -4,102 +4,102 @@
 #include <coroutine>
 #include <exception>
 #include <optional>
-#include <stdexcept>
+#include <stop_token>
 #include <utility>
+
+#include "async/operation.h"
+#include "async/stop_then.h"
 
 #include <async/final_awaiter.h>
 
 namespace async {
 
-/**
- * @brief Lazy, joinable coroutine task.
- *
- * `Task<T>` represents a suspended coroutine that produces a value of
- * type `T` (or nothing for the `void` specialization). The coroutine
- * does not start automatically; it is driven by a `co_await` expression
- * in a parent coroutine or by manually resuming the underlying handle.
- *
- * Ownership is move-only: the destructor destroys the coroutine frame
- * if it has not yet been transferred. When `co_await`-ed, symmetric
- * transfer via `FinalAwaiter` resumes the parent without a recursive
- * call stack.
- *
- * @tparam T Return value type; defaults to `void`.
- */
-template<typename T = void>
-class Task;
+template<typename T>
+struct is_stop_token_wrapped: std::false_type {};
 
 template<typename T>
+struct is_stop_token_wrapped<StopTokenWrapper<T>>: std::true_type {};
+
+template<typename T>
+concept already_wrapped = is_stop_token_wrapped<std::remove_cvref_t<T>>::value;
+
+template<typename T>
+class TaskReturnType {
+protected:
+    std::optional<T> result_;
+
+public:
+    template<typename U>
+        requires std::convertible_to<U&&, T>
+    void return_value(U&& value) noexcept(std::is_nothrow_constructible_v<T, U&&>)
+    {
+        result_.emplace(std::forward<U>(value));
+    }
+
+    auto result() noexcept -> T&&
+    {
+        return std::move(*result_);
+    }
+};
+
+template<>
+class TaskReturnType<void> {
+public:
+    void return_void() noexcept {}
+};
+
+
+template<typename T = void>
 class Task {
 public:
-    class promise_type;
+    struct promise_type;
     using handle_type = std::coroutine_handle<promise_type>;
 
-    /**
-     * @brief Coroutine promise that stores the return value or exception.
-     *
-     * The coroutine suspends at both `initial_suspend` and `final_suspend`.
-     * The `next` handle is set by `Awaiter::await_suspend` so `FinalAwaiter`
-     * can perform the symmetric transfer back to the waiting parent.
-     */
-    class promise_type {
-    public:
-        auto get_return_object() noexcept -> Task { return Task{ handle_type::from_promise(*this) }; }
+    struct promise_type: TaskReturnType<T> {
+        std::coroutine_handle<> next{ nullptr };
+        union { std::exception_ptr exception; };
+        bool has_exception{ false };
+        std::stop_token stop_token;
+
+        promise_type() {}
+
+        ~promise_type()
+        {
+            if (has_exception)
+                exception.~exception_ptr();
+        }
+
+        auto get_return_object() noexcept -> Task 
+        { 
+            return Task{ handle_type::from_promise(*this) }; 
+        }
 
         auto initial_suspend() noexcept -> std::suspend_always { return {}; }
 
         auto final_suspend() noexcept -> FinalAwaiter { return {}; }
 
-        void unhandled_exception() noexcept { exception_ = std::current_exception(); }
-
-        /**
-         * @brief Store the coroutine's return value.
-         *
-         * Accepts any type convertible to `T` so callers can `co_return`
-         * without an explicit cast.
-         */
-        template<typename U>
-            requires std::convertible_to<U&&, T>
-        void return_value(U&& value) noexcept(std::is_nothrow_constructible_v<T, U&&>)
-        {
-            value_.emplace(std::forward<U>(value));
+        void unhandled_exception() noexcept 
+        { 
+            new (&exception) std::exception_ptr(std::current_exception());
+            has_exception = true;
         }
 
-        /**
-         * @brief Extract the stored value or rethrow a captured exception.
-         *
-         * Called by `Awaiter::await_resume` to deliver the result to the
-         * parent coroutine. Clears the stored value after extraction so
-         * repeated calls on the same promise are rejected.
-         *
-         * @return Stored value of type `T`.
-         * @throws Whatever the coroutine threw via `unhandled_exception`.
-         * @throws std::logic_error If called before a value was set.
-         */
-        [[nodiscard]]
-        auto result() -> T
+        template<cancelable_operation Operation>
+            requires (!already_wrapped<Operation>)
+        auto await_transform(Operation&& operation)
         {
-            if (exception_)
-                std::rethrow_exception(exception_);
-
-            if (!value_)
-                throw std::logic_error{ "No value returned from coroutine" };
-
-            auto out = std::move(*value_);
-            value_.reset();
-            return out;
+            return stop_then(std::forward<Operation>(operation), stop_token);
         }
 
-        std::coroutine_handle<> next{ nullptr };
-
-    private:
-        std::exception_ptr exception_;
-        std::optional<T> value_;
+        template<typename Awaitable>
+        auto await_transform(Awaitable&& awaitable) -> decltype(auto)
+        {
+            return std::forward<Awaitable>(awaitable);
+        }
     };
 
     Task() = default;
 
-    /** @brief Take ownership of an existing coroutine handle. */
     Task(handle_type handle)
       : handle_{ handle }
     {}
@@ -107,162 +107,10 @@ public:
     Task(const Task&) = delete;
     auto operator=(const Task&) -> Task& = delete;
 
-    /** @brief Transfer handle ownership; source becomes empty. */
     Task(Task&& other) noexcept
       : handle_{ std::exchange(other.handle_, {}) }
     {}
 
-    /**
-     * @brief Destroy current frame (if any) then take ownership from source.
-     *
-     * Self-assignment is a no-op.
-     */
-    auto operator=(Task&& other) noexcept -> Task&
-    {
-        if (this == &other)
-            return *this;
-
-        if (handle_)
-            handle_.destroy();
-
-        handle_ = std::exchange(other.handle_, nullptr);
-        return *this;
-    }
-
-    /** @brief Destroy the coroutine frame if still owned. */
-    ~Task()
-    {
-        if (handle_)
-            handle_.destroy();
-    }
-
-    /** @brief Return `true` when the coroutine has finished or is empty. */
-    [[nodiscard]]
-    auto done() const noexcept -> bool
-    {
-        return !handle_ || handle_.done();
-    }
-
-    /** @brief Expose the underlying coroutine handle for advanced use cases. */
-    [[nodiscard]]
-    auto handle() const noexcept -> handle_type
-    {
-        return handle_;
-    }
-
-    /**
-     * @brief Awaiter that starts this task and resumes the parent on completion.
-     *
-     * `await_suspend` chains this task to its parent via symmetric transfer.
-     * `await_resume` extracts the result (or rethrows a stored exception)
-     * from the promise.
-     */
-    class Awaiter {
-    public:
-        explicit Awaiter(handle_type handle)
-          : handle_{ handle }
-        {}
-
-        [[nodiscard]]
-        auto await_ready() const noexcept -> bool
-        {
-            return !handle_ || handle_.done();
-        }
-
-        auto await_suspend(std::coroutine_handle<> next) -> std::coroutine_handle<>
-        {
-            handle_.promise().next = next;
-            return handle_;
-        }
-
-        auto await_resume() const -> T
-        {
-            if (!handle_)
-                throw std::logic_error{ "Invalid coroutine handle" };
-
-            return handle_.promise().result();
-        }
-
-    private:
-        handle_type handle_;
-    };
-
-    /**
-     * @brief Produce an `Awaiter` when this task is `co_await`-ed.
-     *
-     * Rvalue-qualified so the handle is consumed exactly once, preventing
-     * accidental double-await of the same task.
-     */
-    auto operator co_await() && noexcept { return Awaiter{ handle_ }; }
-
-private:
-    handle_type handle_{ nullptr };
-};
-
-
-/**
- * @brief `Task<void>` specialization for coroutines that return no value.
- *
- * Identical semantics to `Task<T>` but the promise stores only an
- * exception pointer and `result()` either rethrows or returns normally.
- */
-template<>
-class Task<void> {
-public:
-    class promise_type;
-    using handle_type = std::coroutine_handle<promise_type>;
-
-    class promise_type {
-    public:
-        std::coroutine_handle<> next{ nullptr };
-
-        auto get_return_object() noexcept -> Task { return Task{ handle_type::from_promise(*this) }; }
-
-        auto initial_suspend() noexcept -> std::suspend_always { return {}; }
-
-        auto final_suspend() noexcept -> FinalAwaiter { return {}; }
-
-        void unhandled_exception() noexcept { exception_ = std::current_exception(); }
-
-        void return_void() noexcept {}
-
-        /**
-         * @brief Rethrow any exception captured during coroutine execution.
-         *
-         * Called by `Awaiter::await_resume`; returns normally on success.
-         *
-         * @throws Whatever the coroutine threw via `unhandled_exception`.
-         */
-        void result()
-        {
-            if (exception_)
-                std::rethrow_exception(exception_);
-        }
-
-    private:
-        std::exception_ptr exception_;
-    };
-
-    Task() = default;
-
-    /** @brief Take ownership of an existing coroutine handle. */
-    Task(handle_type handle)
-      : handle_{ handle }
-    {}
-
-    Task(const Task&) = delete;
-    auto operator=(const Task&) -> Task& = delete;
-
-    /** @brief Transfer handle ownership; source becomes empty. */
-    Task(Task&& other) noexcept
-      : handle_{ std::exchange(other.handle_, nullptr) }
-    {}
-
-    /**
-     * @brief Destroy current frame (if any) then take ownership from source.
-     *
-     * Self-assignment is a no-op.
-     */
     auto operator=(Task&& other) noexcept -> Task&
     {
         if (this == &other)
@@ -275,73 +123,52 @@ public:
         return *this;
     }
 
-    /** @brief Destroy the coroutine frame if still owned. */
     ~Task()
     {
         if (handle_)
             handle_.destroy();
     }
 
-    /** @brief Return `true` when the coroutine has finished or is empty. */
-    [[nodiscard]]
-    auto done() const noexcept -> bool
+    constexpr auto await_ready() const noexcept -> bool
     {
-        return !handle_ || handle_.done();
+        return false;
     }
 
-    /** @brief Expose the underlying coroutine handle for advanced use cases. */
-    [[nodiscard]]
-    auto handle() const noexcept -> handle_type
+    template<typename Promise>
+    auto await_suspend(std::coroutine_handle<Promise> parent) -> std::coroutine_handle<>
+    {
+        handle_.promise().next = parent;
+
+        // 如果父协程中有 stop_token，则将其传递给子协程
+        if constexpr (requires { parent.promise().stop_token; })
+            handle_.promise().stop_token = parent.promise().stop_token;
+
+        return handle_;
+    }
+
+    auto await_resume() const
+    {
+        if (handle_.promise().has_exception)
+            std::rethrow_exception(handle_.promise().exception);
+
+        if constexpr (!std::is_void_v<T>)
+            return handle_.promise().result();
+        else
+            return;
+    }
+
+    auto handle() const noexcept
     {
         return handle_;
     }
 
-    /**
-     * @brief Awaiter that starts this task and resumes the parent on completion.
-     *
-     * `await_resume` calls `promise_type::result()` which rethrows any stored
-     * exception; it returns normally on success.
-     */
-    class Awaiter {
-    public:
-        explicit Awaiter(handle_type handle)
-          : handle_{ handle }
-        {}
-
-        [[nodiscard]]
-        auto await_ready() const noexcept -> bool
-        {
-            return !handle_ || handle_.done();
-        }
-
-        auto await_suspend(std::coroutine_handle<> next) -> std::coroutine_handle<>
-        {
-            handle_.promise().next = next;
-            return handle_;
-        }
-
-        void await_resume() const
-        {
-            if (!handle_)
-                throw std::logic_error{ "Invalid coroutine handle" };
-
-            handle_.promise().result();
-        }
-
-    private:
-        handle_type handle_;
-    };
-
-    /**
-     * @brief Produce an `Awaiter` when this task is `co_await`-ed.
-     *
-     * Rvalue-qualified so the handle is consumed exactly once, preventing
-     * accidental double-await of the same task.
-     */
-    auto operator co_await() && noexcept { return Awaiter{ handle_ }; }
+    void release() noexcept
+    {
+        handle_ = nullptr;
+    }
 
 private:
-    handle_type handle_{ nullptr };
+    handle_type handle_;
 };
 
 } // namespace async

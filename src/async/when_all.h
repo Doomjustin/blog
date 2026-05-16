@@ -40,7 +40,7 @@ namespace async {
  * @note The submission queue must have at least N free slots.
  */
 template<cancelable_operation... Awaiters>
-class WhenAllAwaiter: public CancelableOperation {
+class WhenAllAwaiter: public Operation {
 public:
     using resume_type = std::tuple<std::expected<typename Awaiters::resume_type, std::error_code>...>;
 
@@ -85,15 +85,12 @@ public:
      *
      * Resumes the coroutine once all N completions have been received.
      */
-    void complete(int result, std::uint32_t flags) noexcept override
+    void complete(int result, std::uint32_t flags) noexcept
     {
-        if (--pending_ == 0)
-            this->resume(handle_, result, flags);
-    }
-
-    void cancel() noexcept override
-    {
-        cancel_all(std::index_sequence_for<Awaiters...>{});
+        if (--pending_ == 0) {
+            auto h = handle_;
+            h.resume();
+        }
     }
 
     auto context() noexcept -> decltype(auto)

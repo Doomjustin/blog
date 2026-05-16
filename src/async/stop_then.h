@@ -8,6 +8,9 @@
 #include <optional>
 #include <stop_token>
 #include <system_error>
+#include <type_traits>
+
+#include "common/exceptions.h"
 
 #include <async/operation.h>
 #include <async/post.h>
@@ -17,8 +20,6 @@ namespace async {
 template<cancelable_operation Op>
 class StopTokenWrapper: public CancelableOperation {
 public:
-    using resume_type = typename Op::resume_type;
-
     StopTokenWrapper(Op&& op, std::stop_token token)
       : inner_{ std::forward<Op>(op) },
         stop_token_{ std::move(token) }
@@ -57,14 +58,13 @@ public:
         return true;
     }
 
-    auto await_resume() -> std::expected<resume_type, std::error_code>
+    // 包装类必须返回expeected类型，且在取消时返回operation_canceled错误码
+    auto await_resume()
     {
-        if (pre_stopped_)
-            return std::unexpected(std::make_error_code(std::errc::operation_canceled));
+        using InnerR = decltype(inner_.await_resume());
 
-        // Cancellation CQE should be surfaced uniformly as operation_canceled.
-        if (result_ == -ECANCELED)
-            return std::unexpected(std::make_error_code(std::errc::operation_canceled));
+        if (pre_stopped_ || result_ == -ECANCELED)
+            return InnerR{ std::unexpect, std::make_error_code(std::errc::operation_canceled) };
 
         return inner_.await_resume();
     }
@@ -106,7 +106,8 @@ private:
 template<cancelable_operation Op>
 auto stop_then(Op&& operation, std::stop_token token)
 {
-    return StopTokenWrapper<std::decay_t<Op>>{ std::forward<Op>(operation), std::move(token) };
+    using CancelOperation = std::remove_cvref_t<Op>;
+    return StopTokenWrapper<CancelOperation>{ std::forward<Op>(operation), std::move(token) };
 }
 
 } // namespace async

@@ -234,7 +234,7 @@ public:
     [[nodiscard]]
     auto receive() -> ReceiveAwaiter 
     { 
-        return ReceiveAwaiter{*this}; 
+        return ReceiveAwaiter{ *this }; 
     }
 
     // ── SendAwaiter ───────────────────────────────────────────────────────
@@ -295,7 +295,7 @@ public:
         friend class Channel;
 
     public:
-        using resume_type = std::expected<T, std::error_code>;
+        using resume_type = T;
 
         explicit ReceiveAwaiter(Channel& ch) 
           : ch_{ ch }, ctx_{ &ch_.context() }

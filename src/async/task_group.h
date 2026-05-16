@@ -93,7 +93,7 @@ public:
         if (state_->pending_.fetch_sub(1, std::memory_order_acq_rel) == 1)
             co_return;
 
-        co_await StopRequestedAwaiter(state_->drained_.get_token());
+        co_await StopRequestedAwaiter(context(), state_->drained_.get_token());
     }
 
     auto context() const noexcept -> IOContext&

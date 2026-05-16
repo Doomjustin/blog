@@ -5,9 +5,8 @@
 #include <cstdint>
 #include <utility>
 
-#include <common/mpsc_queue.h>
-
 #include <common/common.h>
+#include <common/mpsc_queue.h>
 
 namespace async {
 
@@ -60,7 +59,7 @@ struct CancelableOperation : public Operation {
      * Set by the combinator immediately after construction. Must not be
      * modified after the operation has been submitted to the ring.
      */
-    CancelableOperation* parent{ nullptr };
+    Operation* parent{ nullptr };
     
     CancelableOperation() = default;
 

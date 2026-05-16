@@ -61,7 +61,7 @@ inline constexpr bool all_same_v = (std::is_same_v<First, Rest> && ...);
  * @note The submission queue must have at least N free slots.
  */
 template<cancelable_operation... Awaiters>
-class WhenAnyAwaiter: public CancelableOperation {
+class WhenAnyAwaiter: public Operation {
 public:
     using resume_type = std::conditional_t<
         detail::all_same_v<typename Awaiters::resume_type...>,
@@ -121,12 +121,7 @@ public:
      * `WhenAnyAwaiter` itself is never set as the `parent` of any inner op;
      * the per-index `Slot` objects serve that role.
      */
-    void complete(int /*result*/, std::uint32_t /*flags*/) noexcept override {}
-
-    void cancel() noexcept override
-    {
-        cancel_all(std::index_sequence_for<Awaiters...>{});
-    }
+    void complete(int /*result*/, std::uint32_t /*flags*/) noexcept {}
 
     auto context() noexcept -> decltype(auto)
     {
@@ -156,7 +151,7 @@ private:
 
         void cancel() noexcept override
         {
-            owner->cancel();
+            // when_any is not cancelable, so this is a no-op
         }
     };
 
@@ -231,7 +226,8 @@ private:
         }
 
         if (pending_ == 0 && !is_canceling_losers_ && !is_suspending_) {
-            this->resume(handle_, result, flags);
+            auto h = std::exchange(handle_, nullptr);
+            h.resume();
         }
     }
 
