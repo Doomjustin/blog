@@ -5,9 +5,9 @@
 #include <concepts>
 #include <cstddef>
 
-#include <common/fixed_string.h>
+#include <common/meta/string.h>
 
-template<typename T, FixedString Name, template<typename> class... Skills>
+template<typename T, meta::String Name, template<typename> class... Skills>
     requires std::is_arithmetic_v<T>
 class NamedType : public Skills<NamedType<T, Name, Skills...>>... {
 public:
@@ -277,7 +277,7 @@ struct Printable {
     }
 };
 
-template<typename T, FixedString Name, template<typename> class... Skills>
+template<typename T, meta::String Name, template<typename> class... Skills>
 struct std::hash<NamedType<T, Name, Skills...>> {
     auto operator()(const NamedType<T, Name, Skills...>& obj) const noexcept -> std::size_t
     {

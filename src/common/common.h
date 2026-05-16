@@ -5,11 +5,11 @@
 #include <common/chrono_duration.h>
 #include <common/coding.h>
 #include <common/exceptions.h>
-#include <common/fixed_string.h>
 #include <common/format.h>
 #include <common/hash.h>
 #include <common/log.h>
 #include <common/lru_cache.h>
+#include <common/meta/meta.h>
 #include <common/mpsc_queue.h>
 #include <common/named_type.h>
 #include <common/overloads.h>
