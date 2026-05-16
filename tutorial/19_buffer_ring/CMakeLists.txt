@@ -1,3 +1,0 @@
-add_executable(tutorial.19_buffer_ring main.cpp)
-target_link_libraries(tutorial.19_buffer_ring blog)
-target_compile_features(tutorial.19_buffer_ring PRIVATE cxx_std_23)

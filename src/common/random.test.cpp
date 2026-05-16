@@ -1,4 +1,4 @@
-#include <common/random.h>
+#include "random.h"
 
 #include <algorithm>
 #include <array>

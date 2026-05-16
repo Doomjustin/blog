@@ -1,3 +1,0 @@
-add_executable(tutorial.22_custom_awaiter main.cpp)
-target_link_libraries(tutorial.22_custom_awaiter blog)
-target_compile_features(tutorial.22_custom_awaiter PRIVATE cxx_std_23)

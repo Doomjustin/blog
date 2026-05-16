@@ -1,11 +1,9 @@
-#include <common/coding.h>
+#include "coding.h"
 
 #include <array>
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
-
-// ------- varint::length -----------------------------------------------------
 
 TEST_CASE("varint::length: single-byte values (0–127)", "[varint]")
 {

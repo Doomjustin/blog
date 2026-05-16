@@ -75,5 +75,4 @@ private:
 
 } // namespace
 
-
 std::unique_ptr<Logger> log::default_logger = std::make_unique<Spdlog>();

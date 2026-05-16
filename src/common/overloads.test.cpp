@@ -1,4 +1,4 @@
-#include <common/overloads.h>
+#include "overloads.h"
 
 #include <variant>
 
@@ -15,20 +15,20 @@ TEST_CASE("Overload: multiple callables on std::variant", "[overloads]")
     using V = std::variant<int, float, std::string>;
 
     auto visitor = Overload{
-        [](int v) { return std::string{ "int:" }    + std::to_string(v); },
-        [](float v) { return std::string{ "float:" }  + std::to_string(v); },
-        [](const std::string& v){ return std::string{ "string:" } + v; },
+        [](int v) { return std::string{ "int:" } + std::to_string(v); },
+        [](float v) { return std::string{ "float:" } + std::to_string(v); },
+        [](const std::string& v) { return std::string{ "string:" } + v; },
     };
 
     REQUIRE(std::visit(visitor, V{ 42 }) == "int:42");
     REQUIRE(std::visit(visitor, V{ 1.5F }) == "float:1.500000");
-    REQUIRE(std::visit(visitor, V{ std::string{"hi"} }) == "string:hi");
+    REQUIRE(std::visit(visitor, V{ std::string{ "hi" } }) == "string:hi");
 }
 
 TEST_CASE("Overload: CTAD deduction guide works", "[overloads]")
 {
     // Verify CTAD: no explicit template args needed.
     Overload ov{ [](int) { return 1; }, [](double) { return 2; } };
-    REQUIRE(ov(0)   == 1);
+    REQUIRE(ov(0) == 1);
     REQUIRE(ov(0.0) == 2);
 }

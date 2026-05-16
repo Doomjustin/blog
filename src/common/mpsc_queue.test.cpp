@@ -1,4 +1,4 @@
-#include <common/mpsc_queue.h>
+#include "mpsc_queue.h"
 
 #include <array>
 #include <atomic>
@@ -21,9 +21,12 @@ TEST_CASE("MPSCQueue: single producer single consumer via pop_all (FIFO)", "[mps
 {
     MPSCQueue<Node> q;
 
-    Node n1{}; n1.seq = 1;
-    Node n2{}; n2.seq = 2;
-    Node n3{}; n3.seq = 3;
+    Node n1{};
+    n1.seq = 1;
+    Node n2{};
+    n2.seq = 2;
+    Node n3{};
+    n3.seq = 3;
 
     q.push(&n1);
     q.push(&n2);
@@ -70,13 +73,15 @@ TEST_CASE("MPSCQueue: multi producer single consumer", "[mpsc_queue]")
     for (std::size_t p = 0; p < producer_count; ++p) {
         producers.emplace_back([&, p] {
             started.fetch_add(1, std::memory_order_release);
-            while (!go.load(std::memory_order_acquire)) {}
+            while (!go.load(std::memory_order_acquire)) {
+            }
             for (std::size_t i = 0; i < per_producer; ++i)
                 q.push(&nodes[p][i]);
         });
     }
 
-    while (started.load(std::memory_order_acquire) != producer_count) {}
+    while (started.load(std::memory_order_acquire) != producer_count) {
+    }
     go.store(true, std::memory_order_release);
 
     std::array<std::size_t, producer_count> seen{};

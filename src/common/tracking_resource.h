@@ -7,7 +7,7 @@
 
 #include <gsl/gsl>
 
-class TrackingMemoryResource: public std::pmr::memory_resource {
+class TrackingMemoryResource : public std::pmr::memory_resource {
 public:
     explicit TrackingMemoryResource(gsl::not_null<std::pmr::memory_resource*> upstream)
       : upstream_{ upstream }
@@ -30,7 +30,8 @@ private:
     void do_deallocate(void* ptr, std::size_t bytes, std::size_t alignment) override;
 
     [[nodiscard]]
-    constexpr auto do_is_equal(const std::pmr::memory_resource& other) const noexcept -> bool override
+    constexpr auto do_is_equal(const std::pmr::memory_resource& other) const noexcept
+        -> bool override
     {
         return this == &other;
     }

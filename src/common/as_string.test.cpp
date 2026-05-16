@@ -1,4 +1,4 @@
-#include <common/as_string.h>
+#include "as_string.h"
 
 #include <array>
 
@@ -26,9 +26,8 @@ TEST_CASE("as_string: const span", "[as_string]")
 
     SECTION("binary bytes with embedded null")
     {
-        const std::array<std::byte, 3> data = {
-            std::byte{'a'}, std::byte{0}, std::byte{'b'}
-        };
+        const std::array<std::byte, 3> data = { std::byte{ 'a' }, std::byte{ 0 },
+                                                std::byte{ 'b' } };
         auto sv = as_string(std::span{ data });
         REQUIRE(sv.size() == 3);
         REQUIRE(sv[0] == 'a');

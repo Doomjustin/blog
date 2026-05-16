@@ -14,15 +14,6 @@ add_blog_executable(socket_v1)
 add_blog_executable(tcp_ip)
 add_blog_executable(benchmark)
 
-add_executable(demo.demo demo.cpp)
-target_link_libraries(demo.demo PRIVATE blog::blog)
-target_compile_features(demo.demo PUBLIC cxx_std_23)
-
-add_executable(demo.benchmark2 benchmark2.cpp)
-target_link_libraries(demo.benchmark2 PRIVATE blog::blog)
-target_compile_features(demo.benchmark2 PUBLIC cxx_std_23)
-
-
 add_executable(demo.benchmark_asio benchmark_asio.cpp)
 target_compile_definitions(demo.benchmark_asio 
     PRIVATE

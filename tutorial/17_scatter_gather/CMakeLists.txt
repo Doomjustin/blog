@@ -1,3 +1,0 @@
-add_executable(tutorial.17_scatter_gather main.cpp)
-target_link_libraries(tutorial.17_scatter_gather blog)
-target_compile_features(tutorial.17_scatter_gather PRIVATE cxx_std_23)

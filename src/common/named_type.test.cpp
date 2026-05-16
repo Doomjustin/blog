@@ -1,13 +1,13 @@
-#include <common/named_type.h>
+#include "named_type.h"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 // Define some concrete named types for testing
-using Meter    = NamedType<double, "Meter",    Arithmetic, Comparable>;
+using Meter = NamedType<double, "Meter", Arithmetic, Comparable>;
 using Kilogram = NamedType<double, "Kilogram", Arithmetic, Comparable>;
-using Seconds  = NamedType<float,  "Seconds",  Arithmetic, Comparable>;
-using Count    = NamedType<int,    "Count",    Arithmetic, Comparable, Hashable, Bitwise>;
+using Seconds = NamedType<float, "Seconds", Arithmetic, Comparable>;
+using Count = NamedType<int, "Count", Arithmetic, Comparable, Hashable, Bitwise>;
 
 // ------- construction / get / operator* ------------------------------------
 

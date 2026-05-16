@@ -36,5 +36,3 @@ endif()
 
 add_subdirectory(src)
 add_subdirectory(demo)
-add_subdirectory(tutorial)
-add_subdirectory(examples)

@@ -1,4 +1,4 @@
-#include <common/hash.h>
+#include "hash.h"
 
 #include <string>
 #include <unordered_map>

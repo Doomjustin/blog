@@ -1,3 +1,0 @@
-add_executable(tutorial.16_channel_pipe main.cpp)
-target_link_libraries(tutorial.16_channel_pipe blog)
-target_compile_features(tutorial.16_channel_pipe PRIVATE cxx_std_23)
