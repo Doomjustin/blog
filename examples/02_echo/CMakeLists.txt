@@ -1,0 +1,2 @@
+add_example(02_echo_server)
+add_example(02_echo_client)

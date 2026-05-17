@@ -14,21 +14,18 @@ class WriteAwaiter : public async::IOAwaiter<WriteAwaiter, std::size_t> {
 private:
     int fd_;
     std::span<const std::byte> buffer_;
+    std::uint64_t offset_{ 0 };
 
 public:
-    WriteAwaiter(int fd, std::span<const std::byte> buffer)
+    WriteAwaiter(int fd, std::span<const std::byte> buffer, std::uint64_t offset = 0)
       : fd_{ fd }
       , buffer_{ buffer }
+      , offset_{ offset }
     {}
 
     void prepare(::io_uring_sqe* sqe) const noexcept
     {
-        ::io_uring_prep_write(sqe, fd_, buffer_.data(), buffer_.size(), 0);
-    }
-
-    auto value() noexcept -> std::size_t
-    {
-        return static_cast<std::size_t>(this->result);
+        ::io_uring_prep_write(sqe, fd_, buffer_.data(), buffer_.size(), offset_);
     }
 };
 

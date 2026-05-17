@@ -7,6 +7,7 @@
 #include <span>
 #include <system_error>
 
+#include "buffer.h"
 #include "task.h"
 
 namespace async {
@@ -18,7 +19,7 @@ concept WritableAwaitable = requires(T& awaitable) {
 
 template<typename T>
 concept WritableStream = requires(T& stream, std::span<const std::byte> buffer) {
-    { stream.async_write(buffer) } -> WritableAwaitable;
+    { stream.async_write_some(buffer) } -> WritableAwaitable;
 };
 
 template<WritableStream Stream>
@@ -30,7 +31,7 @@ auto write(Stream& stream, std::span<const std::byte> buffer)
     while (total_write < buffer.size()) {
         auto chunk = buffer.subspan(total_write);
 
-        auto result = co_await stream.async_write(chunk);
+        auto result = co_await stream.async_write_some(chunk);
         if (!result)
             co_return std::unexpected(result.error());
 
@@ -42,6 +43,12 @@ auto write(Stream& stream, std::span<const std::byte> buffer)
     }
 
     co_return std::in_place;
+}
+
+template<WritableStream Stream, std::ranges::contiguous_range T>
+auto write(Stream& stream, const T& range) -> Task<std::expected<void, std::error_code>>
+{
+    return write(stream, async::buffer(range));
 }
 
 } // namespace async

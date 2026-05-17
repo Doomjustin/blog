@@ -36,12 +36,6 @@ public:
 
         ::io_uring_prep_recvmsg(sqe, fd_, &msg, 0);
     }
-
-    auto value() noexcept -> std::size_t
-    {
-        // result < 0 时，父类会优先处理，只有 result >= 0 时才会调用 value() 获取实际结果。
-        return static_cast<std::size_t>(this->result);
-    }
 };
 
 } // namespace net

@@ -60,6 +60,11 @@ public:
         else
             return static_cast<Derived*>(this)->value();
     }
+
+    auto value() noexcept -> Resume
+    {
+        return static_cast<Resume>(result);
+    }
 };
 
 } // namespace async

@@ -4,6 +4,7 @@ function(add_example name)
     target_compile_features(example.${name} PRIVATE cxx_std_23)
 endfunction()
 
-add_example(hello_world)
-add_example(echo_server)
-add_example(echo_client)
+
+add_subdirectory(01_hello)
+add_subdirectory(02_echo)
+add_subdirectory(03_chat)

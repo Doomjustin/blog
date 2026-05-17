@@ -2,18 +2,35 @@
 
 #include <utility>
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <common/common.h>
 
 namespace fs {
 
-auto StreamFile::open(const std::string& path, flag flags, permission perms) -> int
+auto std_input() -> StreamFile
 {
-    auto res = ::open(path.data(), std::to_underlying(flags), std::to_underlying(perms));
+    return StreamFile{ STDIN_FILENO, false };
+}
 
-    if (res == -1)
-        throw_system_error("failed to open file '{}'", path);
+auto std_output() -> StreamFile
+{
+    return StreamFile{ STDOUT_FILENO, false };
+}
 
-    return res;
+auto std_error() -> StreamFile
+{
+    return StreamFile{ STDERR_FILENO, false };
+}
+
+auto pipe() -> std::pair<StreamFile, StreamFile>
+{
+    std::array<int, 2> fds;
+    if (::pipe2(fds.data(), O_CLOEXEC) == -1)
+        throw_system_error("failed to create pipe");
+
+    return { StreamFile{ fds[0] }, StreamFile{ fds[1] } };
 }
 
 } // namespace fs

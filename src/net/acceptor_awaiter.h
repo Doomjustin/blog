@@ -28,6 +28,7 @@ public:
                                endpoint_ ? &addrlen_ : nullptr, 0);
     }
 
+    // 覆写 value() 以在成功时返回 socket_type，并在 endpoint_ 非空时调整其大小。
     auto value() noexcept -> socket_type
     {
         if (endpoint_)

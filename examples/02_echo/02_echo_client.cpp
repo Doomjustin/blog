@@ -18,18 +18,18 @@ auto shutdown_monitor(std::stop_source stop_source) -> async::Task<>
 
 auto user_input(net::ip::tcp::socket& socket) -> async::Task<>
 {
-    auto stream = fs::stdin();
+    auto stream = fs::std_input();
 
     std::string buffer(4096, '\0');
     while (true) {
-        auto res = co_await stream.async_read(async::buffer(buffer));
+        auto res = co_await stream.async_read_some(buffer);
         if (!res) {
             log::error("read stdin failed: {}", res.error());
             co_return;
         }
 
         auto write_buffer = buffer.substr(0, *res);
-        auto write_res = co_await async::write(socket, async::buffer(write_buffer));
+        auto write_res = co_await async::write(socket, write_buffer);
         if (!write_res) {
             log::error("write socket failed: {}", write_res.error());
             co_return;
@@ -51,16 +51,16 @@ auto client(std::string_view address, std::uint16_t port) -> async::Task<>
     co_await async::spawn(user_input(socket));
 
     std::string buffer(4096, '\0');
-    auto stream = fs::stdout();
+    auto stream = fs::std_output();
     while (true) {
-        auto res = co_await socket.async_read(async::buffer(buffer));
+        auto res = co_await socket.async_read_some(buffer);
         if (!res) {
             log::error("read socket failed: {}", res.error());
             co_return;
         }
 
         auto message = buffer.substr(0, *res);
-        auto write_res = co_await stream.async_write(async::buffer(message));
+        auto write_res = co_await stream.async_write_some(message);
         if (!write_res) {
             log::error("write stdout failed: {}", write_res.error());
             co_return;

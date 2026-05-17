@@ -29,21 +29,40 @@ public:
       : base_type{ fd }
     {}
 
-    auto async_send_to(const endpoint_type& peer, std::span<const std::byte> buffer)
+    auto async_send_some_to(const endpoint_type& peer, std::span<const std::byte> buffer)
         -> SendMessageAwaiter<Protocol>
     {
         return SendMessageAwaiter<Protocol>{ this->fd(), buffer };
     }
 
-    auto async_receive_from(std::span<std::byte> buffer) -> ReceiveMessageAwaiter<Protocol>
+    template<std::ranges::contiguous_range T>
+    auto async_send_some_to(const endpoint_type& peer, const T& range)
+        -> SendMessageAwaiter<Protocol>
+    {
+        return async_send_some_to(peer, async::buffer(range));
+    }
+
+    auto async_receive_some_from(std::span<std::byte> buffer) -> ReceiveMessageAwaiter<Protocol>
     {
         return ReceiveMessageAwaiter<Protocol>{ this->fd(), buffer };
     }
 
-    auto async_receive_from(std::span<std::byte> buffer, endpoint_type& sender)
+    template<std::ranges::contiguous_range T>
+    auto async_receive_some_from(T& range) -> ReceiveMessageAwaiter<Protocol>
+    {
+        return async_receive_some_from(async::buffer(range));
+    }
+
+    auto async_receive_some_from(std::span<std::byte> buffer, endpoint_type& sender)
         -> ReceiveMessageAwaiter<Protocol>
     {
         return ReceiveMessageAwaiter<Protocol>{ this->fd(), buffer, &sender };
+    }
+
+    template<std::ranges::contiguous_range T>
+    auto async_receive_from(T& range, endpoint_type& sender) -> ReceiveMessageAwaiter<Protocol>
+    {
+        return async_receive_some_from(async::buffer(range), sender);
     }
 };
 

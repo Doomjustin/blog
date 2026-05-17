@@ -3,10 +3,22 @@
 
 #include <blog.h>
 
+#include "file_system/stream_file.h"
+
 using namespace std::literals;
 
 auto hello() -> async::Task<>
 {
+    auto std_out =
+        co_await fs::async_open<fs::StreamFile>("/dev/stdout", fs::StreamFile::flag::write_only);
+
+    if (!std_out)
+        log::error("failed to open stdout: {}", std_out.error());
+    else
+        log::info("opened stdout with fd {}", std_out->native_handle());
+
+    co_await std_out->async_write_some("Hello, world!\n"sv);
+
     log::info("before");
 
     auto res = co_await async::timeout(async::sleep_for(10s), 5s);

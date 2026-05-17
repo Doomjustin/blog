@@ -89,17 +89,29 @@ public:
     /// @brief 异步接收数据（io_uring）。
     /// @param[in] buffer 接收缓冲区。
     /// @return ReceiveAwaiter，co_await 后返回 expected<size_t, error_code>。
-    auto async_read(std::span<std::byte> buffer) noexcept -> ReceiveAwaiter
+    auto async_read_some(std::span<std::byte> buffer) noexcept -> ReceiveAwaiter
     {
         return { this->native_handle(), buffer };
+    }
+
+    template<std::ranges::contiguous_range T>
+    auto async_read_some(T& range) noexcept -> ReceiveAwaiter
+    {
+        return async_read_some(async::buffer(range));
     }
 
     /// @brief 异步发送数据（io_uring）。
     /// @param[in] buffer 发送缓冲区。
     /// @return SendAwaiter，co_await 后返回 expected<size_t, error_code>。
-    auto async_write(std::span<const std::byte> buffer) noexcept -> SendAwaiter
+    auto async_write_some(std::span<const std::byte> buffer) noexcept -> SendAwaiter
     {
         return { this->native_handle(), buffer };
+    }
+
+    template<std::ranges::contiguous_range T>
+    auto async_write_some(const T& range) noexcept -> SendAwaiter
+    {
+        return async_write_some(async::buffer(range));
     }
 };
 

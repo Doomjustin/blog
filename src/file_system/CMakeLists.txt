@@ -18,11 +18,11 @@ target_link_libraries(blog_file_system
 
 if (blog_BUILD_TESTS AND BLOG_FILE_SYSTEM_TEST_SOURCE)
     include(Catch)
-    add_executable(tests.file_system.unit ${BLOG_FILE_SYSTEM_TEST_SOURCE})
-    target_link_libraries(tests.file_system.unit
+    add_executable(tests.file_system ${BLOG_FILE_SYSTEM_TEST_SOURCE})
+    target_link_libraries(tests.file_system
         PRIVATE
             blog::file_system
             Catch2::Catch2WithMain
     )
-    catch_discover_tests(tests.file_system.unit)
+    catch_discover_tests(tests.file_system)
 endif()

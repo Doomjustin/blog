@@ -1,0 +1,2 @@
+add_example(03_chat_server)
+add_example(03_chat_client)

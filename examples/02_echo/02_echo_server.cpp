@@ -18,10 +18,10 @@ auto shutdown_monitor(std::stop_source stop_source) -> async::Task<>
 
 auto session(net::ip::tcp::socket socket) -> async::Task<>
 {
-    std::array<char, 4096> buffer;
+    std::string buffer(4096, '\0');
 
     while (true) {
-        auto read_res = co_await socket.async_read(async::buffer(buffer));
+        auto read_res = co_await socket.async_read_some(buffer);
         if (!read_res) {
             log::error("read failed: {}", read_res.error());
             break;
@@ -32,8 +32,8 @@ auto session(net::ip::tcp::socket socket) -> async::Task<>
             break;
         }
 
-        auto write_view = std::string_view{ buffer.data(), *read_res };
-        auto write_res = co_await socket.async_write(async::buffer(write_view));
+        std::string_view write_buffer{ buffer.data(), *read_res };
+        auto write_res = co_await socket.async_write_some(write_buffer);
         if (!write_res) {
             log::error("write failed: {}", write_res.error());
             break;
