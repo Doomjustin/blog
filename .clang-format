@@ -56,12 +56,12 @@ IncludeBlocks: Regroup
 IncludeCategories:
   - Regex: '^<[a-z0-9_]+>$'
     Priority: 1
+  - Regex: '^<(common|net|async)/.*>$'
+    Priority: 4
   - Regex: '^<[a-zA-Z0-9_/\.]+\.h>$'
     Priority: 2
   - Regex: '^<[a-zA-Z0-9_]+/[a-zA-Z0-9_/\.]+>$'
     Priority: 3
-  - Regex: '^<xin/.*>$'
-    Priority: 4
   - Regex: '^".*"'
     Priority: 5
 PackConstructorInitializers: Never

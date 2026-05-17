@@ -5,9 +5,10 @@
 #include <ostream>
 
 #include <arpa/inet.h>
-#include <net/ip/address.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+
+#include <net/ip/address.h>
 
 namespace net::ip {
 

@@ -9,6 +9,8 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+add_compile_options(-fsanitize=thread -fno-omit-frame-pointer -g)
+add_link_options(-fsanitize=thread)
 
 include(CTest)
 include(CMakeDependentOption)
@@ -36,3 +38,4 @@ endif()
 
 add_subdirectory(src)
 add_subdirectory(demo)
+add_subdirectory(examples)
