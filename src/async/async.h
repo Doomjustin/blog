@@ -1,6 +1,7 @@
 #ifndef BLOG_ASYNC_H
 #define BLOG_ASYNC_H
 
+#include <async/all_any.h>
 #include <async/buffer.h>
 #include <async/channel.h>
 #include <async/close_awaiter.h>

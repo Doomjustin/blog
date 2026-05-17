@@ -47,6 +47,77 @@ private:
         return false;
     }
 
+    auto try_send(std::unique_lock<std::mutex>& locker, T&& value, SendAwaiter* sender) noexcept
+        -> bool
+    {
+        if (!receivers_.empty()) {
+            auto* receiver = receivers_.front();
+            receivers_.pop_front();
+            receiver->value_ = std::move(value);
+
+            locker.unlock();
+            receiver->result = 0;
+            receiver->context_->post(receiver);
+
+            if (sender)
+                sender->result = 0;
+
+            return true;
+        }
+
+        if (buffer_.size() < capacity_) {
+            buffer_.push_back(std::move(value));
+
+            if (sender)
+                sender->result = 0;
+
+            return true;
+        }
+
+        return false;
+    }
+
+    auto try_receive(std::unique_lock<std::mutex>& locker, std::optional<T>& out,
+                     ReceiveAwaiter* receiver) noexcept -> bool
+    {
+        if (!buffer_.empty()) {
+            out = std::move(buffer_.front());
+            buffer_.pop_front();
+
+            if (!senders_.empty()) {
+                auto* sender = senders_.front();
+                senders_.pop_front();
+                buffer_.push_back(std::move(sender->value_));
+
+                locker.unlock();
+                sender->result = 0;
+                sender->context_->post(sender);
+            }
+
+            if (receiver)
+                receiver->result = 0;
+
+            return true;
+        }
+
+        if (!senders_.empty()) {
+            auto* sender = senders_.front();
+            senders_.pop_front();
+
+            out = std::move(sender->value_);
+            locker.unlock();
+            sender->result = 0;
+            sender->context_->post(sender);
+
+            if (receiver)
+                receiver->result = 0;
+
+            return true;
+        }
+
+        return false;
+    }
+
 public:
     class SendAwaiter : public Operation {
         friend class ReceiveAwaiter;
@@ -87,32 +158,13 @@ public:
 
         auto try_send(std::unique_lock<std::mutex>& locker) noexcept -> bool
         {
-            if (!channel_->receivers_.empty()) {
-                auto* receiver = channel_->receivers_.front();
-                channel_->receivers_.pop_front();
-                locker.unlock();
-
-                receiver->value_ = std::move(value_);
-                receiver->result = 0;
-                receiver->context_->post(receiver);
-                this->result = 0;
-                return true;
-            }
-
-            if (channel_->buffer_.size() < channel_->capacity()) {
-                channel_->buffer_.push_back(std::move(value_));
-                this->result = 0;
-                return true;
-            }
-
-            return false;
+            return channel_->try_send(locker, std::move(value_), this);
         }
 
         auto await_ready() noexcept -> bool
         {
             std::unique_lock<std::mutex> locker{ channel_->mutex_ };
             return try_send(locker);
-            // return false;
         }
 
         template<typename Promise>
@@ -190,38 +242,7 @@ public:
 
         auto try_receive(std::unique_lock<std::mutex>& locker) noexcept -> bool
         {
-            if (!channel_->buffer_.empty()) {
-                value_ = std::move(channel_->buffer_.front());
-                channel_->buffer_.pop_front();
-
-                if (!channel_->senders_.empty()) {
-                    auto* sender = channel_->senders_.front();
-                    channel_->senders_.pop_front();
-                    channel_->buffer_.push_back(std::move(sender->value_));
-
-                    locker.unlock();
-                    sender->result = 0;
-                    sender->context_->post(sender);
-                }
-
-                this->result = 0;
-                return true;
-            }
-
-            if (!channel_->senders_.empty()) {
-                auto* sender = channel_->senders_.front();
-                channel_->senders_.pop_front();
-
-                locker.unlock();
-                value_ = std::move(sender->value_);
-                sender->result = 0;
-                sender->context_->post(sender);
-
-                this->result = 0;
-                return true;
-            }
-
-            return false;
+            return channel_->try_receive(locker, value_, this);
         }
 
     public:
@@ -298,33 +319,18 @@ public:
 
     auto try_receive() noexcept -> std::optional<T>
     {
-        std::scoped_lock locker{ mutex_ };
-        if (buffer_.empty())
-            return {};
+        std::unique_lock locker{ mutex_ };
+        std::optional<T> value;
+        if (try_receive(locker, value, nullptr))
+            return value;
 
-        auto value = std::move(buffer_.front());
-        buffer_.pop_front();
-
-        if (!senders_.empty()) {
-            auto* sender = senders_.front();
-            senders_.pop_front();
-
-            buffer_.push_back(std::move(sender->value_));
-            sender->result = 0;
-            sender->context_->post(sender);
-        }
-
-        return value;
+        return {};
     }
 
     auto try_send(T value) noexcept -> bool
     {
-        std::scoped_lock locker{ mutex_ };
-        if (buffer_.size() >= capacity_)
-            return false;
-
-        buffer_.push_back(std::move(value));
-        return true;
+        std::unique_lock locker{ mutex_ };
+        return try_send(locker, std::move(value), nullptr);
     }
 
     auto async_receive() noexcept -> ReceiveAwaiter

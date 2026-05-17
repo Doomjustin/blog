@@ -97,8 +97,6 @@ int main()
 
 ## 教程
 
-逐步学习 io_uring + C++23 协程网络编程：[docs/tutorial/README.md](docs/tutorial/README.md)
-
 ## 博客
 
 记录了这个库从零搭建的全过程：
