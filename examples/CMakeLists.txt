@@ -6,3 +6,4 @@ endfunction()
 
 add_example(hello_world)
 add_example(echo_server)
+add_example(echo_client)

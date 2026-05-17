@@ -17,11 +17,11 @@ target_link_libraries(blog_async
 
 if (blog_BUILD_TESTS AND BLOG_ASYNC_TEST_SOURCE)
     include(Catch)
-    add_executable(tests.async.unit ${BLOG_ASYNC_TEST_SOURCE})
-    target_link_libraries(tests.async.unit
+    add_executable(tests.async ${BLOG_ASYNC_TEST_SOURCE})
+    target_link_libraries(tests.async
         PRIVATE
             blog::async
             Catch2::Catch2WithMain
     )
-    catch_discover_tests(tests.async.unit)
+    catch_discover_tests(tests.async)
 endif()

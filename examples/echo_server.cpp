@@ -2,9 +2,6 @@
 
 #include <blog.h>
 
-#include "net/ip/address.h"
-#include "net/query_endpoint.h"
-
 auto shutdown_monitor(std::stop_source stop_source) -> async::Task<>
 {
     async::SignalSet signals{ async::signals::interrupt, async::signals::terminate };
@@ -15,7 +12,7 @@ auto shutdown_monitor(std::stop_source stop_source) -> async::Task<>
         co_return;
     }
 
-    log::info("received terminate signal {}", *res);
+    log::info("received signal: {}", *res);
     stop_source.request_stop();
 }
 
@@ -59,7 +56,7 @@ auto echo() -> async::Task<>
             co_return;
         }
 
-        co_await co_spawn(session(std::move(*res)));
+        co_await async::spawn(session(std::move(*res)));
     }
 }
 

@@ -47,7 +47,7 @@ public:
 /// @brief 构造 `shift_to` awaiter。
 /// @param[in] context 目标 IOContext。
 /// @return 对应的 `ShiftToAwaiter`。
-auto shift_to(IOContext& context) -> ShiftToAwaiter
+inline auto shift_to(IOContext& context) -> ShiftToAwaiter
 {
     return ShiftToAwaiter{ context };
 }

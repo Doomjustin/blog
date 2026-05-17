@@ -91,7 +91,7 @@ auto co_spawn(IOContext& context, std::stop_token stop_token, Awaitable awaitabl
 /// 因此应在拥有 Task promise 上下文的 coroutine 内使用。
 template<typename Awaitable>
     requires std::movable<std::remove_cvref_t<Awaitable>>
-auto co_spawn(Awaitable awaitable) -> Task<>
+auto spawn(Awaitable awaitable) -> Task<>
 {
     auto& ctx = co_await this_coro::context;
     auto token = co_await this_coro::stop_token;

@@ -1,6 +1,7 @@
 add_subdirectory(common)
 add_subdirectory(async)
 add_subdirectory(net)
+add_subdirectory(file_system)
 
 
 add_library(blog INTERFACE blog.h)
@@ -12,4 +13,5 @@ target_link_libraries(blog
         blog::common
         blog::async
         blog::net
+        blog::file_system
 )

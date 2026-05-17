@@ -77,7 +77,7 @@ struct signals {
 /// 该 awaiter 基于 `io_uring_prep_read` 读取 `signalfd_siginfo`：
 /// - completion 成功后可通过 `result()` 读取 `ssi_signo`。
 /// - 取消/错误语义由 `SingleShotAwaiter` 路径统一处理。
-class SignalAwaiter : public IOAwaiter<SignalAwaiter, int> {
+class SignalAwaiter : public IOAwaiter<SignalAwaiter, Signal> {
 private:
     int fd_;
     ::signalfd_siginfo info_{};
@@ -98,10 +98,10 @@ public:
 
     /// @brief 返回最近一次读取到的 signal number。
     /// @return `signalfd_siginfo::ssi_signo`。
-    auto value() const noexcept -> int
+    auto value() const noexcept -> Signal
     {
         // 错误值由 IOAwaiter 基类处理，这里仅返回成功读取的信号即可。
-        return info_.ssi_signo;
+        return Signal{ static_cast<int>(info_.ssi_signo) };
     }
 };
 
@@ -160,7 +160,7 @@ public:
     }
 };
 
-auto format_as(const Signal& signal) -> std::string_view
+inline auto format_as(const Signal& signal) -> std::string_view
 {
     switch (signal) {
     case signals::interrupt:

@@ -2,6 +2,8 @@
 #define BLOG_ASYNC_H
 
 #include <async/buffer.h>
+#include <async/channel.h>
+#include <async/close_awaiter.h>
 #include <async/co_spawn.h>
 #include <async/io_awaiter.h>
 #include <async/io_context.h>
